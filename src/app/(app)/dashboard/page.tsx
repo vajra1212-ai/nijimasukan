@@ -24,6 +24,7 @@ function loadSettings(raw: { key: string; value: string }[]): Settings {
     supplier_name:         map.supplier_name ?? '',
     supplier_contact_name: map.supplier_contact_name ?? '',
     supplier_phone:        map.supplier_phone ?? '',
+    current_unit_price:    parseInt(map.current_unit_price ?? '0'),
   }
 }
 
@@ -113,9 +114,12 @@ export default function DashboardPage() {
   const isClosed = !!dailyRecord?.closed_at
   const isStockCalculated = dailyRecord?.closing_estimated_remaining == null && currentStock != null
 
+  // 単価優先順：今日の仕入れ単価 → 設定の基準単価（時期ごとに設定）
+  const effectiveUnitPrice = dailyRecord?.purchase_unit_price || settings?.current_unit_price || 0
+
   const summary = useMemo(() =>
-    settings ? calcDailySummary(sessions, dailyRecord?.purchase_unit_price ?? 0, settings) : null
-  , [settings, sessions, dailyRecord])
+    settings ? calcDailySummary(sessions, effectiveUnitPrice, settings) : null
+  , [settings, sessions, effectiveUnitPrice])
 
   const forecast = useMemo(() =>
     currentStock !== null && settings

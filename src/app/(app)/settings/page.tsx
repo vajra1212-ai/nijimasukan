@@ -16,6 +16,7 @@ export default function SettingsPage() {
   const [saltGrilledFee, setSaltGrilledFee] = useState('700')
   const [guttedFee, setGuttedFee] = useState('600')
   const [alertThreshold, setAlertThreshold] = useState('100')
+  const [currentUnitPrice, setCurrentUnitPrice] = useState('0')
   const [supplierName, setSupplierName] = useState('')
   const [supplierContact, setSupplierContact] = useState('')
   const [supplierPhone, setSupplierPhone] = useState('')
@@ -41,6 +42,7 @@ export default function SettingsPage() {
       setSaltGrilledFee(map.salt_grilled_fee ?? '700')
       setGuttedFee(map.gutted_fee ?? '600')
       setAlertThreshold(map.stock_alert_threshold ?? '100')
+      setCurrentUnitPrice(map.current_unit_price ?? '0')
       setSupplierName(map.supplier_name ?? '')
       setSupplierContact(map.supplier_contact_name ?? '')
       setSupplierPhone(map.supplier_phone ?? '')
@@ -60,6 +62,7 @@ export default function SettingsPage() {
       { key: 'salt_grilled_fee',      value: saltGrilledFee },
       { key: 'gutted_fee',            value: guttedFee },
       { key: 'stock_alert_threshold', value: alertThreshold },
+      { key: 'current_unit_price',    value: currentUnitPrice },
       { key: 'supplier_name',         value: supplierName },
       { key: 'supplier_contact_name', value: supplierContact },
       { key: 'supplier_phone',        value: supplierPhone },
@@ -129,6 +132,17 @@ export default function SettingsPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </Card>
+
+        <Card>
+          <h3 className="text-sm font-semibold text-slate-500 mb-3">仕入れ単価</h3>
+          <p className="text-xs text-slate-400 mb-2">時期によって変わる場合はここで更新してください。原価計算に使われます。</p>
+          <label className="text-xs text-slate-400">現在の仕入れ単価（1匹あたり）</label>
+          <div className="flex items-center gap-1">
+            <input type="number" inputMode="numeric" value={currentUnitPrice}
+              onChange={e => setCurrentUnitPrice(e.target.value)} className={inputClass} />
+            <span className="text-slate-400 text-sm shrink-0">円/匹</span>
           </div>
         </Card>
 

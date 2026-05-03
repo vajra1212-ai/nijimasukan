@@ -176,6 +176,17 @@ export interface Settings {
   supplier_name: string
   supplier_contact_name: string
   supplier_phone: string
+  current_unit_price: number  // 現在の仕入れ単価（時期ごとに変更可能）
+}
+
+export interface PurchasePayment {
+  id: string
+  year_month: string   // '2025-05'
+  total_amount: number
+  payment_due_date: string
+  paid_at: string | null
+  notes: string | null
+  created_at: string
 }
 
 export interface HistoricalDaily {

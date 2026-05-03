@@ -36,6 +36,7 @@ function loadSettings(raw: { key: string; value: string }[]): Settings {
     supplier_name:         map.supplier_name ?? '',
     supplier_contact_name: map.supplier_contact_name ?? '',
     supplier_phone:        map.supplier_phone ?? '',
+    current_unit_price:    parseInt(map.current_unit_price ?? '0'),
   }
 }
 
@@ -77,6 +78,7 @@ export default function ReportPage() {
       participation_fee: 500, takeaway_fee: 400, salt_grilled_fee: 700,
       gutted_fee: 600, stock_alert_threshold: 100,
       supplier_name: '', supplier_contact_name: '', supplier_phone: '',
+      current_unit_price: 0,
     }
 
     const priceMap: Record<string, number> = {}

@@ -29,6 +29,7 @@ function loadSettings(raw: { key: string; value: string }[]): Settings {
     supplier_name:         map.supplier_name ?? '',
     supplier_contact_name: map.supplier_contact_name ?? '',
     supplier_phone:        map.supplier_phone ?? '',
+    current_unit_price:    parseInt(map.current_unit_price ?? '0'),
   }
 }
 
@@ -142,11 +143,13 @@ export default function DailyPage() {
   useEffect(() => { fetchData() }, [fetchData])
 
   // ---- 計算 ----
+  // 単価：支払金額÷匹数 → なければ設定の基準単価を使用
   const unitPrice = useMemo(() => {
     const total = parseInt(purchaseTotalAmount) || 0
     const count = purchase || 0
-    return total > 0 && count > 0 ? Math.round(total / count) : 0
-  }, [purchaseTotalAmount, purchase])
+    if (total > 0 && count > 0) return Math.round(total / count)
+    return settings?.current_unit_price ?? 0
+  }, [purchaseTotalAmount, purchase, settings])
 
   // 本日の消費匹数（セッションから集計）
   const todayConsumption = useMemo(() =>
@@ -197,6 +200,15 @@ export default function DailyPage() {
       await supabase.from('daily_records').update(payload).eq('id', existingRecord.id)
     } else {
       await supabase.from('daily_records').insert(payload)
+    }
+
+    // 仕入れ単価を設定に自動反映（purchase_total_amountから計算した場合）
+    if (unitPrice > 0 && purchase > 0) {
+      await supabase.from('settings').upsert({
+        key: 'current_unit_price',
+        value: String(unitPrice),
+        updated_at: new Date().toISOString(),
+      })
     }
 
     // 出勤記録を保存
