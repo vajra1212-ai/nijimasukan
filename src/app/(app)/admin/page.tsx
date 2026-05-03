@@ -89,6 +89,17 @@ export default function AdminPage() {
           <span className="ml-auto text-xl text-slate-300">›</span>
         </Link>
 
+        {/* シフト・勤怠管理 */}
+        <Link href="/shifts"
+          className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">
+          <span className="text-2xl">👷</span>
+          <div>
+            <p className="font-bold text-sm text-slate-700">シフト・勤怠管理</p>
+            <p className="text-xs text-slate-400">月次給与・時間集計</p>
+          </div>
+          <span className="ml-auto text-xl text-slate-300">›</span>
+        </Link>
+
         {/* 前年データ入力へのリンク */}
         <Link href="/admin/history"
           className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">

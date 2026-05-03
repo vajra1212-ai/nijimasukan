@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { calcDailySummary, calcStockForecast, formatCurrency } from '@/lib/calculations'
@@ -8,8 +8,9 @@ import { Session, DailyRecord, Settings, SupplierContact, HandoverMemo, WorkShif
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Card, AlertCard } from '@/components/ui/Card'
 
-function today() {
-  return new Date().toLocaleDateString('sv-SE')
+function today() { return new Date().toLocaleDateString('sv-SE') }
+function yesterdayStr() {
+  const d = new Date(); d.setDate(d.getDate() - 1); return d.toLocaleDateString('sv-SE')
 }
 
 function loadSettings(raw: { key: string; value: string }[]): Settings {
@@ -29,6 +30,7 @@ function loadSettings(raw: { key: string; value: string }[]): Settings {
 export default function DashboardPage() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [dailyRecord, setDailyRecord] = useState<DailyRecord | null>(null)
+  const [prevDayClosing, setPrevDayClosing] = useState<number | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [pendingDelivery, setPendingDelivery] = useState<SupplierContact | null>(null)
   const [handover, setHandover] = useState<HandoverMemo | null>(null)
@@ -40,13 +42,11 @@ export default function DashboardPage() {
   const fetchData = useCallback(async () => {
     const supabase = createClient()
     const date = today()
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    const yesterdayStr = yesterday.toLocaleDateString('sv-SE')
 
     const [
       { data: sessionsData },
       { data: dailyData },
+      { data: prevDayData },
       { data: settingsData },
       { data: deliveryData },
       { data: handoverData },
@@ -56,11 +56,15 @@ export default function DashboardPage() {
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
+      supabase.from('daily_records')
+        .select('closing_estimated_remaining')
+        .eq('date', yesterdayStr())
+        .single(),
       supabase.from('settings').select('*'),
       supabase.from('supplier_contacts')
         .select('*').eq('delivery_confirmed', false).eq('has_order', true)
         .lte('expected_delivery_date', date).order('expected_delivery_date').limit(1).single(),
-      supabase.from('handover_memos').select('*, staff(name)').eq('date', yesterdayStr).single(),
+      supabase.from('handover_memos').select('*, staff(name)').eq('date', yesterdayStr()).single(),
       supabase.from('equipment_checks').select('*').eq('date', date).eq('status', 'order_required'),
       supabase.from('daily_summary').select('total_consumption').order('date', { ascending: false }).limit(3),
       supabase.from('work_shifts').select('*, part_timers(name, hourly_wage)').eq('date', date),
@@ -68,6 +72,7 @@ export default function DashboardPage() {
 
     setSessions((sessionsData as Session[]) ?? [])
     setDailyRecord(dailyData as DailyRecord | null)
+    setPrevDayClosing((prevDayData as { closing_estimated_remaining: number | null } | null)?.closing_estimated_remaining ?? null)
     setSettings(settingsData ? loadSettings(settingsData as { key: string; value: string }[]) : null)
     setPendingDelivery(deliveryData as SupplierContact | null)
     setHandover(handoverData as HandoverMemo | null)
@@ -89,7 +94,32 @@ export default function DashboardPage() {
 
   const dateLabel = new Date().toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' })
   const summary = settings ? calcDailySummary(sessions, dailyRecord?.purchase_unit_price ?? 0, settings) : null
-  const currentStock = dailyRecord?.closing_estimated_remaining ?? dailyRecord?.opening_estimated_remaining ?? null
+
+  // 本日の消費匹数（セッションから自動集計）
+  const todayConsumption = sessions.reduce((sum, s) =>
+    sum + s.salt_grilled_count + s.takeaway_count + (s.gutted_count ?? 0) + (s.gift_count ?? 0) + s.loss_count
+  , 0)
+
+  // 池の推定残数（リアルタイム計算）
+  // 優先順: 1. 今日保存済みのclosing  2. opening + purchase - 消費  3. 前日closing - 消費
+  const currentStock: number | null = useMemo(() => {
+    if (dailyRecord?.closing_estimated_remaining != null) {
+      return dailyRecord.closing_estimated_remaining
+    }
+    if (dailyRecord?.opening_estimated_remaining != null) {
+      return dailyRecord.opening_estimated_remaining + (dailyRecord.purchase_count ?? 0) - todayConsumption
+    }
+    if (prevDayClosing != null) {
+      return prevDayClosing + (dailyRecord?.purchase_count ?? 0) - todayConsumption
+    }
+    return null
+  }, [dailyRecord, prevDayClosing, todayConsumption])
+
+  // 締め済みかどうか
+  const isClosed = !!dailyRecord?.closed_at
+  // 自動計算か保存済みか
+  const isStockCalculated = dailyRecord?.closing_estimated_remaining == null && currentStock != null
+
   const forecast = currentStock !== null && settings
     ? calcStockForecast(currentStock, recentConsumptions, settings.stock_alert_threshold)
     : null
@@ -122,6 +152,7 @@ export default function DashboardPage() {
       </header>
 
       <div className="p-4 space-y-4">
+
         {/* 入荷予定 */}
         {pendingDelivery && (
           <AlertCard type="info">
@@ -130,10 +161,8 @@ export default function DashboardPage() {
                 <p className="font-bold">🚚 本日入荷予定：{pendingDelivery.order_count}匹</p>
                 <p className="text-sm mt-1">{pendingDelivery.memo ?? ''}</p>
               </div>
-              <Link
-                href={`/supplier/confirm/${pendingDelivery.id}`}
-                className="text-sm bg-sky-500 text-white px-3 py-1.5 rounded-lg font-medium"
-              >
+              <Link href={`/supplier/confirm/${pendingDelivery.id}`}
+                className="text-sm bg-sky-500 text-white px-3 py-1.5 rounded-lg font-medium shrink-0">
                 入荷確認
               </Link>
             </div>
@@ -158,6 +187,64 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* 池の残数（最重要情報） */}
+        <Card className={isLowStock ? 'border-red-300 bg-red-50' : 'border-sky-200 bg-sky-50'}>
+          <div className="flex items-start justify-between mb-1">
+            <h2 className="text-sm font-semibold text-slate-500">🐠 今池にいる推定匹数</h2>
+            {isStockCalculated && (
+              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">リアルタイム推計</span>
+            )}
+            {isClosed && (
+              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">✅ 締め済み</span>
+            )}
+          </div>
+          {currentStock !== null ? (
+            <>
+              <p className={`text-5xl font-bold text-center py-2 ${isLowStock ? 'text-red-600' : 'text-sky-700'}`}>
+                {isLowStock ? '⚠️ ' : ''}{Math.max(0, currentStock)}<span className="text-lg font-normal"> 匹</span>
+              </p>
+              {isStockCalculated && (
+                <p className="text-xs text-center text-amber-600 mb-2">
+                  前日繰越{prevDayClosing ?? '?'}匹 + 仕入れ{dailyRecord?.purchase_count ?? 0}匹 − 本日消費{todayConsumption}匹
+                </p>
+              )}
+              {forecast && (
+                <div className="mt-2 space-y-1 text-sm text-slate-600 border-t border-slate-200 pt-2">
+                  <p>平均消費 {forecast.avgConsumption}匹/日</p>
+                  {forecast.daysUntilShortage <= 3 && (
+                    <p className="text-red-600 font-semibold">⚠️ 約{Math.max(0, forecast.daysUntilShortage)}日後に不足予測</p>
+                  )}
+                  {isLowStock && (
+                    <p className="text-red-600 font-semibold">推奨仕入れ：{forecast.recommendedOrder}匹以上</p>
+                  )}
+                </div>
+              )}
+              {/* 発注ショートカット */}
+              <div className="mt-3 flex gap-2">
+                {settings?.supplier_phone && (
+                  <a href={`tel:${settings.supplier_phone}`}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 font-bold text-sm ${
+                      isLowStock ? 'bg-red-500 text-white' : 'bg-white border border-slate-200 text-slate-700'
+                    }`}>
+                    📞 {isLowStock ? '今すぐ電話' : '業者に電話'}
+                  </a>
+                )}
+                <Link href="/supplier"
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-white border border-slate-200 text-slate-700 rounded-xl py-2.5 font-bold text-sm">
+                  📝 発注記録
+                </Link>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-3">
+              <p className="text-slate-400 text-sm mb-2">まだ残数データがありません</p>
+              <Link href="/daily" className="text-sm text-sky-600 font-medium">
+                日次入力で登録 →
+              </Link>
+            </div>
+          )}
+        </Card>
+
         {/* 今日の状況 */}
         <Card>
           <h2 className="text-sm font-semibold text-slate-500 mb-3">今日の状況</h2>
@@ -175,7 +262,7 @@ export default function DashboardPage() {
               <p className="text-2xl font-bold text-sky-600">{formatCurrency(summary?.revenue ?? 0)}</p>
             </div>
             <div className="text-center">
-              <p className="text-xs text-slate-400">粗利</p>
+              <p className="text-xs text-slate-400">粗利（原価のみ）</p>
               <p className="text-2xl font-bold text-green-600">{formatCurrency(summary?.profit ?? 0)}</p>
             </div>
           </div>
@@ -240,39 +327,6 @@ export default function DashboardPage() {
           </Card>
         )}
 
-        {/* 残数・アラート */}
-        <Card className={isLowStock ? 'border-red-300 bg-red-50' : ''}>
-          <h2 className="text-sm font-semibold text-slate-500 mb-2">ニジマス残数</h2>
-          {currentStock !== null ? (
-            <>
-              <p className={`text-4xl font-bold text-center ${isLowStock ? 'text-red-600' : 'text-slate-800'}`}>
-                {isLowStock ? '⚠️ ' : ''}{currentStock}<span className="text-lg font-normal"> 匹</span>
-              </p>
-              {forecast && (
-                <div className="mt-3 space-y-1 text-sm text-slate-600">
-                  <p>平均消費 {forecast.avgConsumption}匹/日</p>
-                  {forecast.daysUntilShortage <= 2 && (
-                    <p className="text-red-600 font-semibold">→ 約{Math.max(0, forecast.daysUntilShortage)}日後に不足予測</p>
-                  )}
-                  {isLowStock && (
-                    <p className="text-red-600 font-semibold">推奨仕入れ：{forecast.recommendedOrder}匹以上</p>
-                  )}
-                </div>
-              )}
-              {isLowStock && settings?.supplier_phone && (
-                <a
-                  href={`tel:${settings.supplier_phone}`}
-                  className="mt-3 w-full flex items-center justify-center gap-2 bg-red-500 text-white rounded-xl py-3 font-bold"
-                >
-                  📞 業者に電話する
-                </a>
-              )}
-            </>
-          ) : (
-            <p className="text-slate-400 text-center py-2">日次入力で残数を登録してください</p>
-          )}
-        </Card>
-
         {/* 備品アラート */}
         {orderRequiredCount > 0 && (
           <Link href="/equipment">
@@ -291,9 +345,30 @@ export default function DashboardPage() {
             <span className="font-bold text-sm">開催回を入力</span>
           </Link>
           <Link href="/daily"
-            className="bg-slate-700 text-white rounded-2xl p-4 flex flex-col items-center gap-1 active:bg-slate-800">
-            <span className="text-2xl">📋</span>
-            <span className="font-bold text-sm">日次入力（締め）</span>
+            className={`rounded-2xl p-4 flex flex-col items-center gap-1 active:opacity-80 ${
+              isClosed ? 'bg-green-600 text-white' : 'bg-slate-700 text-white'
+            }`}>
+            <span className="text-2xl">{isClosed ? '✅' : '📋'}</span>
+            <span className="font-bold text-sm">{isClosed ? '締め済み（修正）' : '日次入力（締め）'}</span>
+          </Link>
+        </div>
+
+        {/* サブリンク */}
+        <div className="grid grid-cols-3 gap-2">
+          <Link href="/supplier"
+            className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center gap-1 active:bg-slate-50">
+            <span className="text-xl">🚚</span>
+            <span className="text-xs font-medium text-slate-600">発注管理</span>
+          </Link>
+          <Link href="/shifts"
+            className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center gap-1 active:bg-slate-50">
+            <span className="text-xl">👷</span>
+            <span className="text-xs font-medium text-slate-600">勤怠集計</span>
+          </Link>
+          <Link href="/records"
+            className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center gap-1 active:bg-slate-50">
+            <span className="text-xl">📝</span>
+            <span className="text-xs font-medium text-slate-600">引き継ぎ</span>
           </Link>
         </div>
       </div>

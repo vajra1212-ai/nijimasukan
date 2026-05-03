@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getAuth } from '@/lib/auth'
@@ -12,6 +12,11 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
 function today() { return new Date().toLocaleDateString('sv-SE') }
+function yesterday() {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  return d.toLocaleDateString('sv-SE')
+}
 
 function loadSettings(raw: { key: string; value: string }[]): Settings {
   const map = Object.fromEntries(raw.map(r => [r.key, r.value]))
@@ -37,11 +42,18 @@ interface ShiftEntry {
 
 export default function DailyPage() {
   const router = useRouter()
+
+  // 仕入れ
   const [purchase, setPurchase] = useState(0)
   const [purchaseWeightKg, setPurchaseWeightKg] = useState('')
   const [purchaseTotalAmount, setPurchaseTotalAmount] = useState('')
+
+  // 残数
   const [opening, setOpening] = useState(0)
-  const [closing, setClosing] = useState(0)
+  const [openingSource, setOpeningSource] = useState<'auto' | 'manual'>('auto')
+  const [prevClosing, setPrevClosing] = useState<number | null>(null)
+
+  // その他
   const [weather, setWeather] = useState<Weather | ''>('')
   const [isHoliday, setIsHoliday] = useState(false)
   const [notes, setNotes] = useState('')
@@ -65,6 +77,7 @@ export default function DailyPage() {
     const [
       { data: sessionsData },
       { data: dr },
+      { data: prevDr },
       { data: settingsData },
       { data: staff },
       { data: ptData },
@@ -72,6 +85,10 @@ export default function DailyPage() {
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
+      supabase.from('daily_records')
+        .select('closing_estimated_remaining')
+        .eq('date', yesterday())
+        .single(),
       supabase.from('settings').select('*'),
       supabase.from('staff').select('id, name').eq('is_active', true),
       supabase.from('part_timers').select('*').eq('is_active', true).order('created_at'),
@@ -83,23 +100,33 @@ export default function DailyPage() {
     setStaffList((staff as { id: string; name: string }[]) ?? [])
     setClosedBy(auth?.staffId ?? '')
 
+    const prevRec = prevDr as { closing_estimated_remaining: number | null } | null
+    const prevClose = prevRec?.closing_estimated_remaining ?? null
+    setPrevClosing(prevClose)
+
     if (dr) {
+      // 既存レコードがある場合はそこから読み込み
       const d = dr as DailyRecord
       setExistingRecord(d)
       setPurchase(d.purchase_count)
       setPurchaseWeightKg(d.purchase_weight_kg != null ? String(d.purchase_weight_kg) : '')
       setPurchaseTotalAmount(d.purchase_total_amount != null ? String(d.purchase_total_amount) : '')
-      setOpening(d.opening_estimated_remaining ?? 0)
-      setClosing(d.closing_estimated_remaining ?? 0)
+      setOpening(d.opening_estimated_remaining ?? prevClose ?? 0)
+      setOpeningSource('manual')
       setWeather(d.weather ?? '')
       setIsHoliday(d.is_holiday ?? false)
       setNotes(d.notes ?? '')
+    } else {
+      // 新規：前日の繰り越しをセット
+      if (prevClose != null) {
+        setOpening(prevClose)
+        setOpeningSource('auto')
+      }
     }
 
     const pts = (ptData as PartTimer[]) ?? []
     setPartTimers(pts)
     const existingShifts = (shiftsData as { id: string; part_timer_id: string; start_time: string; end_time: string }[]) ?? []
-
     setShifts(pts.map(pt => {
       const existing = existingShifts.find(s => s.part_timer_id === pt.id)
       return {
@@ -114,33 +141,43 @@ export default function DailyPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  const summary = settings ? calcDailySummary(sessions, calcUnitPrice(), settings) : null
-
-  function calcUnitPrice(): number {
+  // ---- 計算 ----
+  const unitPrice = useMemo(() => {
     const total = parseInt(purchaseTotalAmount) || 0
     const count = purchase || 0
-    if (total > 0 && count > 0) return Math.round(total / count)
-    return 0
-  }
+    return total > 0 && count > 0 ? Math.round(total / count) : 0
+  }, [purchaseTotalAmount, purchase])
 
-  function calcLaborCost(): number {
-    return shifts.reduce((sum, s) => {
+  // 本日の消費匹数（セッションから集計）
+  const todayConsumption = useMemo(() =>
+    sessions.reduce((sum, r) =>
+      sum + r.salt_grilled_count + r.takeaway_count + (r.gutted_count ?? 0) + (r.gift_count ?? 0) + r.loss_count
+    , 0)
+  , [sessions])
+
+  // 営業終了時推定残数（自動計算）
+  const closingCalc = opening + purchase - todayConsumption
+
+  const summary = settings ? calcDailySummary(sessions, unitPrice, settings) : null
+
+  const laborCost = useMemo(() =>
+    shifts.reduce((sum, s) => {
       if (!s.worked) return sum
       const pt = partTimers.find(p => p.id === s.partTimerId)
       if (!pt) return sum
       const [sh, sm] = s.startTime.split(':').map(Number)
       const [eh, em] = s.endTime.split(':').map(Number)
-      const hours = (eh * 60 + em - sh * 60 - sm) / 60
-      return sum + Math.max(0, hours) * pt.hourly_wage
+      const hours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
+      return sum + hours * pt.hourly_wage
     }, 0)
-  }
+  , [shifts, partTimers])
 
+  // ---- 保存 ----
   const handleSave = async (close: boolean) => {
     setSaving(true)
     const supabase = createClient()
     const date = today()
     const auth = getAuth()
-    const unitPrice = calcUnitPrice()
 
     const payload: Partial<DailyRecord> = {
       date,
@@ -149,7 +186,7 @@ export default function DailyPage() {
       purchase_weight_kg: purchaseWeightKg ? parseFloat(purchaseWeightKg) : null,
       purchase_total_amount: purchaseTotalAmount ? parseInt(purchaseTotalAmount) : null,
       opening_estimated_remaining: opening,
-      closing_estimated_remaining: closing,
+      closing_estimated_remaining: closingCalc,  // 自動計算した値を保存
       weather: weather || null,
       is_holiday: isHoliday,
       notes: notes || null,
@@ -166,17 +203,10 @@ export default function DailyPage() {
     for (const s of shifts) {
       if (s.worked) {
         await supabase.from('work_shifts').upsert(
-          {
-            id: s.shiftId,
-            date,
-            part_timer_id: s.partTimerId,
-            start_time: s.startTime,
-            end_time: s.endTime,
-          },
+          { id: s.shiftId, date, part_timer_id: s.partTimerId, start_time: s.startTime, end_time: s.endTime },
           { onConflict: 'date,part_timer_id' }
         )
       } else if (s.shiftId) {
-        // worked → not worked: 削除
         await supabase.from('work_shifts').delete().eq('id', s.shiftId)
       }
     }
@@ -189,9 +219,6 @@ export default function DailyPage() {
   const updateShift = (ptId: string, field: keyof ShiftEntry, value: boolean | string) => {
     setShifts(prev => prev.map(s => s.partTimerId === ptId ? { ...s, [field]: value } : s))
   }
-
-  const unitPrice = calcUnitPrice()
-  const laborCost = calcLaborCost()
 
   return (
     <div className="max-w-lg mx-auto">
@@ -206,28 +233,20 @@ export default function DailyPage() {
             <div>
               <label className="text-xs text-slate-400">仕入れkg数（任意）</label>
               <div className="flex items-center gap-1 border-b border-slate-200 pb-1">
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={purchaseWeightKg}
+                <input type="number" inputMode="decimal" value={purchaseWeightKg}
                   onChange={e => setPurchaseWeightKg(e.target.value)}
                   placeholder="例：52.5"
-                  className="flex-1 text-sm bg-transparent outline-none"
-                />
+                  className="flex-1 text-sm bg-transparent outline-none" />
                 <span className="text-xs text-slate-400 shrink-0">kg</span>
               </div>
             </div>
             <div>
               <label className="text-xs text-slate-400">支払金額（任意）</label>
               <div className="flex items-center gap-1 border-b border-slate-200 pb-1">
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={purchaseTotalAmount}
+                <input type="number" inputMode="numeric" value={purchaseTotalAmount}
                   onChange={e => setPurchaseTotalAmount(e.target.value)}
                   placeholder="例：41600"
-                  className="flex-1 text-sm bg-transparent outline-none"
-                />
+                  className="flex-1 text-sm bg-transparent outline-none" />
                 <span className="text-xs text-slate-400 shrink-0">円</span>
               </div>
             </div>
@@ -238,22 +257,43 @@ export default function DailyPage() {
                 <span>1匹あたり単価（自動計算）</span>
                 <span className="font-bold text-slate-800">{formatCurrency(unitPrice)}/匹</span>
               </div>
-              {purchase > 0 && unitPrice > 0 && (
-                <div className="flex justify-between">
-                  <span>仕入れ原価</span>
-                  <span className="font-bold text-orange-600">{formatCurrency(purchase * unitPrice)}</span>
-                </div>
-              )}
             </div>
           )}
         </Card>
 
         {/* 残数 */}
         <Card>
-          <h3 className="text-sm font-semibold text-slate-500 mb-3">残数確認</h3>
-          <NumberInput label="営業開始時の推定残数" value={opening} onChange={setOpening} unit="匹" max={9999} />
-          <div className="mt-3">
-            <NumberInput label="営業終了時の推定残数" value={closing} onChange={setClosing} unit="匹" max={9999} />
+          <h3 className="text-sm font-semibold text-slate-500 mb-1">残数</h3>
+
+          {/* 開始時 */}
+          <div className="mb-3">
+            {openingSource === 'auto' && prevClosing != null && (
+              <p className="text-xs text-sky-600 mb-1">📋 前日の繰り越し（{prevClosing}匹）を自動入力しました</p>
+            )}
+            <NumberInput label="営業開始時の残数（調整可）" value={opening} onChange={v => { setOpening(v); setOpeningSource('manual') }} unit="匹" max={9999} />
+          </div>
+
+          {/* 当日消費（読み取り専用） */}
+          <div className="flex justify-between text-sm py-2 border-t border-slate-100">
+            <span className="text-slate-500">本日の消費（セッションから自動）</span>
+            <span className="font-medium text-slate-700">− {todayConsumption}匹</span>
+          </div>
+          {purchase > 0 && (
+            <div className="flex justify-between text-sm py-1">
+              <span className="text-slate-500">本日の仕入れ</span>
+              <span className="font-medium text-slate-700">＋ {purchase}匹</span>
+            </div>
+          )}
+
+          {/* 推定残数（自動計算） */}
+          <div className={`mt-2 rounded-xl p-3 text-center ${closingCalc <= 0 ? 'bg-red-50 border border-red-200' : 'bg-sky-50 border border-sky-200'}`}>
+            <p className="text-xs text-slate-500 mb-1">本日終了後の推定残数（自動計算）</p>
+            <p className={`text-3xl font-bold ${closingCalc <= 0 ? 'text-red-600' : 'text-sky-700'}`}>
+              {closingCalc < 0 ? '⚠️ ' : ''}{Math.max(0, closingCalc)}<span className="text-base font-normal"> 匹</span>
+            </p>
+            {closingCalc < 0 && (
+              <p className="text-xs text-red-500 mt-1">※ 消費が開始時残数＋仕入れを超えています</p>
+            )}
           </div>
         </Card>
 
@@ -268,12 +308,10 @@ export default function DailyPage() {
                 const [sh, sm] = s.startTime.split(':').map(Number)
                 const [eh, em] = s.endTime.split(':').map(Number)
                 const hours = s.worked ? Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60) : 0
-                const wage = hours * pt.hourly_wage
                 return (
                   <div key={s.partTimerId} className={`rounded-xl border p-3 transition-colors ${s.worked ? 'border-sky-200 bg-sky-50' : 'border-slate-100 bg-white'}`}>
                     <div className="flex items-center gap-3 mb-2">
-                      <button
-                        type="button"
+                      <button type="button"
                         onClick={() => updateShift(s.partTimerId, 'worked', !s.worked)}
                         className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors shrink-0 ${
                           s.worked ? 'bg-sky-500 border-sky-500 text-white' : 'border-slate-300'
@@ -286,22 +324,16 @@ export default function DailyPage() {
                     </div>
                     {s.worked && (
                       <div className="flex items-center gap-2 pl-9">
-                        <input
-                          type="time"
-                          value={s.startTime}
+                        <input type="time" value={s.startTime}
                           onChange={e => updateShift(s.partTimerId, 'startTime', e.target.value)}
-                          className="text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none"
-                        />
+                          className="text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none" />
                         <span className="text-slate-400 text-sm">〜</span>
-                        <input
-                          type="time"
-                          value={s.endTime}
+                        <input type="time" value={s.endTime}
                           onChange={e => updateShift(s.partTimerId, 'endTime', e.target.value)}
-                          className="text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none"
-                        />
+                          className="text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none" />
                         {hours > 0 && (
                           <span className="text-xs text-sky-700 font-bold ml-auto">
-                            {hours.toFixed(1)}h / {formatCurrency(wage)}
+                            {hours.toFixed(1)}h / {formatCurrency(hours * pt.hourly_wage)}
                           </span>
                         )}
                       </div>
@@ -344,21 +376,16 @@ export default function DailyPage() {
                 <span>売上</span><span>{formatCurrency(summary.revenue)}</span>
               </div>
               <div className="flex justify-between font-bold text-orange-600">
-                <span>原価</span><span>{formatCurrency(summary.cost)}</span>
+                <span>原価（仕入れ）</span><span>{formatCurrency(summary.cost)}</span>
               </div>
               {laborCost > 0 && (
                 <div className="flex justify-between font-bold text-red-600">
                   <span>人件費</span><span>▲{formatCurrency(laborCost)}</span>
                 </div>
               )}
-              <div className="flex justify-between font-bold text-green-600">
-                <span>粗利（原価のみ）</span><span>{formatCurrency(summary.profit)}</span>
+              <div className={`flex justify-between font-bold text-base ${summary.profit - laborCost >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <span>粗利</span><span>{formatCurrency(summary.profit - laborCost)}</span>
               </div>
-              {laborCost > 0 && (
-                <div className="flex justify-between font-bold text-emerald-700 text-base">
-                  <span>粗利（人件費含む）</span><span>{formatCurrency(summary.profit - laborCost)}</span>
-                </div>
-              )}
             </div>
           </Card>
         )}
@@ -370,9 +397,7 @@ export default function DailyPage() {
             <p className="text-xs text-slate-400 mb-2">天候</p>
             <div className="grid grid-cols-4 gap-2">
               {([['sunny','☀️','晴れ'],['cloudy','☁️','曇り'],['rainy','🌧','雨'],['stormy','⛈','荒天']] as const).map(([val, icon, label]) => (
-                <button
-                  key={val}
-                  type="button"
+                <button key={val} type="button"
                   onClick={() => setWeather(weather === val ? '' : val)}
                   className={`flex flex-col items-center py-2 rounded-xl border text-xs font-medium transition-colors ${
                     weather === val ? 'bg-sky-500 text-white border-sky-500' : 'bg-white text-slate-600 border-slate-200'
@@ -386,11 +411,8 @@ export default function DailyPage() {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-600">祝日・特別日</span>
-            <button
-              type="button"
-              onClick={() => setIsHoliday(!isHoliday)}
-              className={`w-12 h-6 rounded-full transition-colors ${isHoliday ? 'bg-sky-500' : 'bg-slate-200'}`}
-            >
+            <button type="button" onClick={() => setIsHoliday(!isHoliday)}
+              className={`w-12 h-6 rounded-full transition-colors ${isHoliday ? 'bg-sky-500' : 'bg-slate-200'}`}>
               <span className={`block w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${isHoliday ? 'translate-x-6' : ''}`} />
             </button>
           </div>
@@ -398,34 +420,23 @@ export default function DailyPage() {
 
         <div className="bg-white rounded-2xl border border-slate-200 p-4">
           <label className="block text-sm text-slate-500 mb-1">備考</label>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            rows={2}
-            className="w-full text-sm bg-transparent outline-none resize-none"
-          />
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+            className="w-full text-sm bg-transparent outline-none resize-none" />
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-4">
           <label className="block text-sm text-slate-500 mb-1">締め担当</label>
-          <select
-            value={closedBy}
-            onChange={e => setClosedBy(e.target.value)}
-            className="w-full text-sm bg-transparent outline-none"
-          >
+          <select value={closedBy} onChange={e => setClosedBy(e.target.value)}
+            className="w-full text-sm bg-transparent outline-none">
             <option value="">選択してください</option>
-            {staffList.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
+            {staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
 
         {saved && <p className="text-green-600 text-sm text-center">保存しました ✅</p>}
 
         <div className="grid grid-cols-2 gap-3">
-          <Button variant="outline" onClick={() => handleSave(false)} disabled={saving}>
-            一時保存
-          </Button>
+          <Button variant="outline" onClick={() => handleSave(false)} disabled={saving}>一時保存</Button>
           <Button onClick={() => handleSave(true)} disabled={saving}>
             {saving ? '保存中...' : '保存して締める'}
           </Button>
