@@ -86,22 +86,17 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <p className="text-slate-400">読み込み中...</p>
-    </div>
-  )
-
+  // ── Hooks はすべて early return より前に置く ──
   const dateLabel = new Date().toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', weekday: 'short' })
-  const summary = settings ? calcDailySummary(sessions, dailyRecord?.purchase_unit_price ?? 0, settings) : null
 
   // 本日の消費匹数（セッションから自動集計）
-  const todayConsumption = sessions.reduce((sum, s) =>
-    sum + s.salt_grilled_count + s.takeaway_count + (s.gutted_count ?? 0) + (s.gift_count ?? 0) + s.loss_count
-  , 0)
+  const todayConsumption = useMemo(() =>
+    sessions.reduce((sum, s) =>
+      sum + s.salt_grilled_count + s.takeaway_count + (s.gutted_count ?? 0) + (s.gift_count ?? 0) + s.loss_count
+    , 0)
+  , [sessions])
 
   // 池の推定残数（リアルタイム計算）
-  // 優先順: 1. 今日保存済みのclosing  2. opening + purchase - 消費  3. 前日closing - 消費
   const currentStock: number | null = useMemo(() => {
     if (dailyRecord?.closing_estimated_remaining != null) {
       return dailyRecord.closing_estimated_remaining
@@ -115,30 +110,43 @@ export default function DashboardPage() {
     return null
   }, [dailyRecord, prevDayClosing, todayConsumption])
 
-  // 締め済みかどうか
   const isClosed = !!dailyRecord?.closed_at
-  // 自動計算か保存済みか
   const isStockCalculated = dailyRecord?.closing_estimated_remaining == null && currentStock != null
 
-  const forecast = currentStock !== null && settings
-    ? calcStockForecast(currentStock, recentConsumptions, settings.stock_alert_threshold)
-    : null
-  const isLowStock = currentStock !== null && settings && currentStock <= settings.stock_alert_threshold
+  const summary = useMemo(() =>
+    settings ? calcDailySummary(sessions, dailyRecord?.purchase_unit_price ?? 0, settings) : null
+  , [settings, sessions, dailyRecord])
 
-  const totalLaborCost = workShifts.reduce((sum, s) => {
-    const pt = s.part_timers
-    if (!pt) return sum
-    const [sh, sm] = s.start_time.split(':').map(Number)
-    const [eh, em] = s.end_time.split(':').map(Number)
-    const hours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
-    return sum + hours * pt.hourly_wage
-  }, 0)
+  const forecast = useMemo(() =>
+    currentStock !== null && settings
+      ? calcStockForecast(currentStock, recentConsumptions, settings.stock_alert_threshold)
+      : null
+  , [currentStock, settings, recentConsumptions])
+
+  const isLowStock = currentStock !== null && settings != null && currentStock <= settings.stock_alert_threshold
+
+  const totalLaborCost = useMemo(() =>
+    workShifts.reduce((sum, s) => {
+      const pt = s.part_timers
+      if (!pt) return sum
+      const [sh, sm] = s.start_time.split(':').map(Number)
+      const [eh, em] = s.end_time.split(':').map(Number)
+      const hours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
+      return sum + hours * pt.hourly_wage
+    }, 0)
+  , [workShifts])
 
   const urgencyStyle = {
     normal:  'border-slate-200 bg-slate-50',
     caution: 'border-amber-300 bg-amber-50',
     urgent:  'border-red-400 bg-red-50',
   }
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <p className="text-slate-400">読み込み中...</p>
+    </div>
+  )
 
   return (
     <div className="max-w-lg mx-auto">
