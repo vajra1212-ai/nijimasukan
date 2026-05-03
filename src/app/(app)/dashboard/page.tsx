@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { calcDailySummary, calcStockForecast, formatCurrency } from '@/lib/calculations'
-import { Session, DailyRecord, Settings, SupplierContact, HandoverMemo } from '@/types'
+import { Session, DailyRecord, Settings, SupplierContact, HandoverMemo, WorkShift } from '@/types'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Card, AlertCard } from '@/components/ui/Card'
 
@@ -34,6 +34,7 @@ export default function DashboardPage() {
   const [handover, setHandover] = useState<HandoverMemo | null>(null)
   const [orderRequiredCount, setOrderRequiredCount] = useState(0)
   const [recentConsumptions, setRecentConsumptions] = useState<number[]>([])
+  const [workShifts, setWorkShifts] = useState<WorkShift[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
@@ -51,6 +52,7 @@ export default function DashboardPage() {
       { data: handoverData },
       { data: equipmentData },
       { data: recentData },
+      { data: shiftsData },
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
@@ -61,6 +63,7 @@ export default function DashboardPage() {
       supabase.from('handover_memos').select('*, staff(name)').eq('date', yesterdayStr).single(),
       supabase.from('equipment_checks').select('*').eq('date', date).eq('status', 'order_required'),
       supabase.from('daily_summary').select('total_consumption').order('date', { ascending: false }).limit(3),
+      supabase.from('work_shifts').select('*, part_timers(name, hourly_wage)').eq('date', date),
     ])
 
     setSessions((sessionsData as Session[]) ?? [])
@@ -72,6 +75,7 @@ export default function DashboardPage() {
     setRecentConsumptions(
       ((recentData ?? []) as { total_consumption: number }[]).map(r => r.total_consumption)
     )
+    setWorkShifts((shiftsData as WorkShift[]) ?? [])
     setLoading(false)
   }, [])
 
@@ -90,6 +94,15 @@ export default function DashboardPage() {
     ? calcStockForecast(currentStock, recentConsumptions, settings.stock_alert_threshold)
     : null
   const isLowStock = currentStock !== null && settings && currentStock <= settings.stock_alert_threshold
+
+  const totalLaborCost = workShifts.reduce((sum, s) => {
+    const pt = s.part_timers
+    if (!pt) return sum
+    const [sh, sm] = s.start_time.split(':').map(Number)
+    const [eh, em] = s.end_time.split(':').map(Number)
+    const hours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
+    return sum + hours * pt.hourly_wage
+  }, 0)
 
   const urgencyStyle = {
     normal:  'border-slate-200 bg-slate-50',
@@ -197,6 +210,35 @@ export default function DashboardPage() {
             </div>
           )}
         </Card>
+
+        {/* 人件費 */}
+        {workShifts.length > 0 && (
+          <Card>
+            <h2 className="text-sm font-semibold text-slate-500 mb-2">👷 本日の出勤</h2>
+            <div className="space-y-1.5">
+              {workShifts.map(s => {
+                const pt = s.part_timers
+                if (!pt) return null
+                const [sh, sm] = s.start_time.split(':').map(Number)
+                const [eh, em] = s.end_time.split(':').map(Number)
+                const hours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
+                return (
+                  <div key={s.id} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-700 font-medium">{pt.name}</span>
+                    <span className="text-slate-500 text-xs">{s.start_time.slice(0,5)}〜{s.end_time.slice(0,5)}（{hours.toFixed(1)}h）</span>
+                    <span className="text-red-600 font-bold text-xs">{formatCurrency(hours * pt.hourly_wage)}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {totalLaborCost > 0 && (
+              <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between">
+                <span className="text-sm text-slate-600">人件費合計</span>
+                <span className="text-base font-bold text-red-600">{formatCurrency(totalLaborCost)}</span>
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* 残数・アラート */}
         <Card className={isLowStock ? 'border-red-300 bg-red-50' : ''}>

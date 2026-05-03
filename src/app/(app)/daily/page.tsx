@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getAuth } from '@/lib/auth'
 import { calcDailySummary, formatCurrency } from '@/lib/calculations'
-import { Session, DailyRecord, Settings, Weather } from '@/types'
+import { Session, DailyRecord, Settings, Weather, PartTimer } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { NumberInput } from '@/components/ui/NumberInput'
 import { Button } from '@/components/ui/Button'
@@ -27,10 +27,19 @@ function loadSettings(raw: { key: string; value: string }[]): Settings {
   }
 }
 
+interface ShiftEntry {
+  partTimerId: string
+  worked: boolean
+  startTime: string
+  endTime: string
+  shiftId?: string
+}
+
 export default function DailyPage() {
   const router = useRouter()
   const [purchase, setPurchase] = useState(0)
-  const [unitPrice, setUnitPrice] = useState(0)
+  const [purchaseWeightKg, setPurchaseWeightKg] = useState('')
+  const [purchaseTotalAmount, setPurchaseTotalAmount] = useState('')
   const [opening, setOpening] = useState(0)
   const [closing, setClosing] = useState(0)
   const [weather, setWeather] = useState<Weather | ''>('')
@@ -44,16 +53,29 @@ export default function DailyPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // アルバイト出勤
+  const [partTimers, setPartTimers] = useState<PartTimer[]>([])
+  const [shifts, setShifts] = useState<ShiftEntry[]>([])
+
   const fetchData = useCallback(async () => {
     const supabase = createClient()
     const date = today()
     const auth = getAuth()
 
-    const [{ data: sessionsData }, { data: dr }, { data: settingsData }, { data: staff }] = await Promise.all([
+    const [
+      { data: sessionsData },
+      { data: dr },
+      { data: settingsData },
+      { data: staff },
+      { data: ptData },
+      { data: shiftsData },
+    ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
       supabase.from('settings').select('*'),
       supabase.from('staff').select('id, name').eq('is_active', true),
+      supabase.from('part_timers').select('*').eq('is_active', true).order('created_at'),
+      supabase.from('work_shifts').select('*').eq('date', date),
     ])
 
     setSessions((sessionsData as Session[]) ?? [])
@@ -65,29 +87,67 @@ export default function DailyPage() {
       const d = dr as DailyRecord
       setExistingRecord(d)
       setPurchase(d.purchase_count)
-      setUnitPrice(d.purchase_unit_price)
+      setPurchaseWeightKg(d.purchase_weight_kg != null ? String(d.purchase_weight_kg) : '')
+      setPurchaseTotalAmount(d.purchase_total_amount != null ? String(d.purchase_total_amount) : '')
       setOpening(d.opening_estimated_remaining ?? 0)
       setClosing(d.closing_estimated_remaining ?? 0)
       setWeather(d.weather ?? '')
       setIsHoliday(d.is_holiday ?? false)
       setNotes(d.notes ?? '')
     }
+
+    const pts = (ptData as PartTimer[]) ?? []
+    setPartTimers(pts)
+    const existingShifts = (shiftsData as { id: string; part_timer_id: string; start_time: string; end_time: string }[]) ?? []
+
+    setShifts(pts.map(pt => {
+      const existing = existingShifts.find(s => s.part_timer_id === pt.id)
+      return {
+        partTimerId: pt.id,
+        worked: !!existing,
+        startTime: existing ? existing.start_time.slice(0, 5) : '09:00',
+        endTime: existing ? existing.end_time.slice(0, 5) : '17:00',
+        shiftId: existing?.id,
+      }
+    }))
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  const summary = settings ? calcDailySummary(sessions, unitPrice, settings) : null
+  const summary = settings ? calcDailySummary(sessions, calcUnitPrice(), settings) : null
+
+  function calcUnitPrice(): number {
+    const total = parseInt(purchaseTotalAmount) || 0
+    const count = purchase || 0
+    if (total > 0 && count > 0) return Math.round(total / count)
+    return 0
+  }
+
+  function calcLaborCost(): number {
+    return shifts.reduce((sum, s) => {
+      if (!s.worked) return sum
+      const pt = partTimers.find(p => p.id === s.partTimerId)
+      if (!pt) return sum
+      const [sh, sm] = s.startTime.split(':').map(Number)
+      const [eh, em] = s.endTime.split(':').map(Number)
+      const hours = (eh * 60 + em - sh * 60 - sm) / 60
+      return sum + Math.max(0, hours) * pt.hourly_wage
+    }, 0)
+  }
 
   const handleSave = async (close: boolean) => {
     setSaving(true)
     const supabase = createClient()
     const date = today()
     const auth = getAuth()
+    const unitPrice = calcUnitPrice()
 
     const payload: Partial<DailyRecord> = {
       date,
       purchase_count: purchase,
       purchase_unit_price: unitPrice,
+      purchase_weight_kg: purchaseWeightKg ? parseFloat(purchaseWeightKg) : null,
+      purchase_total_amount: purchaseTotalAmount ? parseInt(purchaseTotalAmount) : null,
       opening_estimated_remaining: opening,
       closing_estimated_remaining: closing,
       weather: weather || null,
@@ -102,27 +162,93 @@ export default function DailyPage() {
       await supabase.from('daily_records').insert(payload)
     }
 
+    // 出勤記録を保存
+    for (const s of shifts) {
+      if (s.worked) {
+        await supabase.from('work_shifts').upsert(
+          {
+            id: s.shiftId,
+            date,
+            part_timer_id: s.partTimerId,
+            start_time: s.startTime,
+            end_time: s.endTime,
+          },
+          { onConflict: 'date,part_timer_id' }
+        )
+      } else if (s.shiftId) {
+        // worked → not worked: 削除
+        await supabase.from('work_shifts').delete().eq('id', s.shiftId)
+      }
+    }
+
     setSaving(false)
     setSaved(true)
     if (close) router.push('/')
   }
+
+  const updateShift = (ptId: string, field: keyof ShiftEntry, value: boolean | string) => {
+    setShifts(prev => prev.map(s => s.partTimerId === ptId ? { ...s, [field]: value } : s))
+  }
+
+  const unitPrice = calcUnitPrice()
+  const laborCost = calcLaborCost()
 
   return (
     <div className="max-w-lg mx-auto">
       <PageHeader title="日次入力（締め）" showBack />
       <div className="p-4 space-y-3">
 
+        {/* 仕入れ */}
         <Card>
           <h3 className="text-sm font-semibold text-slate-500 mb-3">本日の仕入れ</h3>
           <NumberInput label="仕入れ匹数" value={purchase} onChange={setPurchase} unit="匹" max={9999} />
-          <div className="mt-3">
-            <NumberInput label="仕入れ単価" value={unitPrice} onChange={setUnitPrice} unit="円/匹" max={9999} />
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-400">仕入れkg数（任意）</label>
+              <div className="flex items-center gap-1 border-b border-slate-200 pb-1">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={purchaseWeightKg}
+                  onChange={e => setPurchaseWeightKg(e.target.value)}
+                  placeholder="例：52.5"
+                  className="flex-1 text-sm bg-transparent outline-none"
+                />
+                <span className="text-xs text-slate-400 shrink-0">kg</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">支払金額（任意）</label>
+              <div className="flex items-center gap-1 border-b border-slate-200 pb-1">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={purchaseTotalAmount}
+                  onChange={e => setPurchaseTotalAmount(e.target.value)}
+                  placeholder="例：41600"
+                  className="flex-1 text-sm bg-transparent outline-none"
+                />
+                <span className="text-xs text-slate-400 shrink-0">円</span>
+              </div>
+            </div>
           </div>
-          {purchase > 0 && unitPrice > 0 && (
-            <p className="text-sm text-slate-500 mt-2 text-right">仕入れ原価：{formatCurrency(purchase * unitPrice)}</p>
+          {unitPrice > 0 && (
+            <div className="mt-2 p-2 bg-slate-50 rounded-xl text-xs text-slate-600 space-y-0.5">
+              <div className="flex justify-between">
+                <span>1匹あたり単価（自動計算）</span>
+                <span className="font-bold text-slate-800">{formatCurrency(unitPrice)}/匹</span>
+              </div>
+              {purchase > 0 && unitPrice > 0 && (
+                <div className="flex justify-between">
+                  <span>仕入れ原価</span>
+                  <span className="font-bold text-orange-600">{formatCurrency(purchase * unitPrice)}</span>
+                </div>
+              )}
+            </div>
           )}
         </Card>
 
+        {/* 残数 */}
         <Card>
           <h3 className="text-sm font-semibold text-slate-500 mb-3">残数確認</h3>
           <NumberInput label="営業開始時の推定残数" value={opening} onChange={setOpening} unit="匹" max={9999} />
@@ -131,6 +257,69 @@ export default function DailyPage() {
           </div>
         </Card>
 
+        {/* アルバイト出勤 */}
+        {partTimers.length > 0 && (
+          <Card>
+            <h3 className="text-sm font-semibold text-slate-500 mb-3">👷 本日の出勤記録</h3>
+            <div className="space-y-3">
+              {shifts.map(s => {
+                const pt = partTimers.find(p => p.id === s.partTimerId)
+                if (!pt) return null
+                const [sh, sm] = s.startTime.split(':').map(Number)
+                const [eh, em] = s.endTime.split(':').map(Number)
+                const hours = s.worked ? Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60) : 0
+                const wage = hours * pt.hourly_wage
+                return (
+                  <div key={s.partTimerId} className={`rounded-xl border p-3 transition-colors ${s.worked ? 'border-sky-200 bg-sky-50' : 'border-slate-100 bg-white'}`}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => updateShift(s.partTimerId, 'worked', !s.worked)}
+                        className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors shrink-0 ${
+                          s.worked ? 'bg-sky-500 border-sky-500 text-white' : 'border-slate-300'
+                        }`}
+                      >
+                        {s.worked && <span className="text-xs font-bold">✓</span>}
+                      </button>
+                      <span className="text-sm font-semibold text-slate-800">{pt.name}</span>
+                      <span className="text-xs text-slate-400 ml-auto">時給 {pt.hourly_wage.toLocaleString()}円</span>
+                    </div>
+                    {s.worked && (
+                      <div className="flex items-center gap-2 pl-9">
+                        <input
+                          type="time"
+                          value={s.startTime}
+                          onChange={e => updateShift(s.partTimerId, 'startTime', e.target.value)}
+                          className="text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none"
+                        />
+                        <span className="text-slate-400 text-sm">〜</span>
+                        <input
+                          type="time"
+                          value={s.endTime}
+                          onChange={e => updateShift(s.partTimerId, 'endTime', e.target.value)}
+                          className="text-sm bg-white border border-slate-200 rounded-lg px-2 py-1 outline-none"
+                        />
+                        {hours > 0 && (
+                          <span className="text-xs text-sky-700 font-bold ml-auto">
+                            {hours.toFixed(1)}h / {formatCurrency(wage)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {laborCost > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
+                <span className="text-sm text-slate-600">本日の人件費合計</span>
+                <span className="text-base font-bold text-red-600">{formatCurrency(laborCost)}</span>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* 集計 */}
         {summary && (
           <Card>
             <h3 className="text-sm font-semibold text-slate-500 mb-3">本日の集計</h3>
@@ -157,9 +346,19 @@ export default function DailyPage() {
               <div className="flex justify-between font-bold text-orange-600">
                 <span>原価</span><span>{formatCurrency(summary.cost)}</span>
               </div>
+              {laborCost > 0 && (
+                <div className="flex justify-between font-bold text-red-600">
+                  <span>人件費</span><span>▲{formatCurrency(laborCost)}</span>
+                </div>
+              )}
               <div className="flex justify-between font-bold text-green-600">
-                <span>粗利</span><span>{formatCurrency(summary.profit)}</span>
+                <span>粗利（原価のみ）</span><span>{formatCurrency(summary.profit)}</span>
               </div>
+              {laborCost > 0 && (
+                <div className="flex justify-between font-bold text-emerald-700 text-base">
+                  <span>粗利（人件費含む）</span><span>{formatCurrency(summary.profit - laborCost)}</span>
+                </div>
+              )}
             </div>
           </Card>
         )}
@@ -221,7 +420,7 @@ export default function DailyPage() {
           </select>
         </div>
 
-        {saved && <p className="text-green-600 text-sm text-center">保存しました</p>}
+        {saved && <p className="text-green-600 text-sm text-center">保存しました ✅</p>}
 
         <div className="grid grid-cols-2 gap-3">
           <Button variant="outline" onClick={() => handleSave(false)} disabled={saving}>

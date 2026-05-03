@@ -42,6 +42,8 @@ export interface DailyRecord {
   season_id: string | null
   purchase_count: number
   purchase_unit_price: number
+  purchase_weight_kg: number | null
+  purchase_total_amount: number | null
   opening_estimated_remaining: number | null
   closing_estimated_remaining: number | null
   weather: Weather | null
@@ -51,6 +53,25 @@ export interface DailyRecord {
   closed_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface PartTimer {
+  id: string
+  name: string
+  hourly_wage: number
+  is_active: boolean
+  created_at: string
+}
+
+export interface WorkShift {
+  id: string
+  date: string
+  part_timer_id: string
+  start_time: string  // "HH:MM"
+  end_time: string    // "HH:MM"
+  notes: string | null
+  created_at: string
+  part_timers?: PartTimer
 }
 
 export type ReservationType = 'group_reservation' | 'event' | 'closure'
