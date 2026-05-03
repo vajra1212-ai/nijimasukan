@@ -179,16 +179,16 @@ export default function DashboardPage() {
                   (s.discount_amount ?? 0)
                 return (
                   <Link key={s.id} href={`/sessions/${s.id}/edit`}
-                    className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 active:bg-slate-100">
+                    className="flex items-center justify-between py-2.5 px-3 rounded-xl bg-slate-50 active:bg-slate-100">
                     <div>
-                      <span className="text-sm font-bold text-slate-700">{s.session_number}回目</span>
-                      <span className="text-xs text-slate-400 ml-2">{s.participants}名</span>
-                      {s.salt_grilled_count > 0 && <span className="text-xs text-slate-400 ml-1">塩{s.salt_grilled_count}</span>}
-                      {(s.gutted_count ?? 0) > 0 && <span className="text-xs text-slate-400 ml-1">わた{s.gutted_count}</span>}
-                      {s.takeaway_count > 0 && <span className="text-xs text-slate-400 ml-1">持{s.takeaway_count}</span>}
+                      <span className="text-sm font-bold text-slate-800">{s.session_number}回目</span>
+                      <span className="text-sm font-semibold text-slate-700 ml-2">{s.participants}名</span>
+                      {s.salt_grilled_count > 0 && <span className="text-sm text-slate-600 ml-1">塩<b>{s.salt_grilled_count}</b></span>}
+                      {(s.gutted_count ?? 0) > 0 && <span className="text-sm text-slate-600 ml-1">わた<b>{s.gutted_count}</b></span>}
+                      {s.takeaway_count > 0 && <span className="text-sm text-slate-600 ml-1">持<b>{s.takeaway_count}</b></span>}
                     </div>
                     <div className="text-right">
-                      <span className="text-sm font-bold text-sky-600">{formatCurrency(sessionRevenue)}</span>
+                      <span className="text-base font-bold text-sky-600">{formatCurrency(sessionRevenue)}</span>
                       <span className="text-xs text-slate-300 ml-1">›</span>
                     </div>
                   </Link>
