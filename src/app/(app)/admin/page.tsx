@@ -67,12 +67,34 @@ export default function AdminPage() {
           <span className="ml-auto text-xl">›</span>
         </Link>
 
+        {/* 過去データ取込 */}
+        <Link href="/admin/import"
+          className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">
+          <span className="text-2xl">📂</span>
+          <div>
+            <p className="font-bold text-sm text-slate-700">過去データ取込</p>
+            <p className="text-xs text-slate-400">CSV・Excel・スクショから入力</p>
+          </div>
+          <span className="ml-auto text-xl text-slate-300">›</span>
+        </Link>
+
+        {/* 分析 */}
+        <Link href="/admin/analysis"
+          className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">
+          <span className="text-2xl">📊</span>
+          <div>
+            <p className="font-bold text-sm text-slate-700">天候・曜日・繁忙期分析</p>
+            <p className="text-xs text-slate-400">仕入れ計画の参考データ</p>
+          </div>
+          <span className="ml-auto text-xl text-slate-300">›</span>
+        </Link>
+
         {/* 前年データ入力へのリンク */}
         <Link href="/admin/history"
           className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">
           <span className="text-2xl">📅</span>
           <div>
-            <p className="font-bold text-sm text-slate-700">前年データ入力</p>
+            <p className="font-bold text-sm text-slate-700">前年データ（月次）入力</p>
             <p className="text-xs text-slate-400">昨年の月次実績を手動入力</p>
           </div>
           <span className="ml-auto text-xl text-slate-300">›</span>

@@ -157,6 +157,24 @@ export interface Settings {
   supplier_phone: string
 }
 
+export interface HistoricalDaily {
+  id: string
+  date: string
+  total_revenue: number
+  participation_revenue: number
+  salt_grilled_revenue: number
+  gutted_revenue: number
+  takeaway_revenue: number
+  other_revenue: number
+  estimated_participants: number
+  weather: Weather | null
+  is_holiday: boolean
+  notes: string | null
+  data_source: string
+  created_at: string
+  updated_at: string
+}
+
 export interface DailySummary {
   date: string
   season_id: string | null
