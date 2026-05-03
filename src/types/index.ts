@@ -1,0 +1,174 @@
+export type Role = 'staff' | 'admin'
+
+export interface Staff {
+  id: string
+  name: string
+  role: Role
+  pin_hash: string
+  is_active: boolean
+  created_at: string
+}
+
+export interface Season {
+  id: string
+  year: number
+  start_date: string
+  end_date: string
+  is_active: boolean
+}
+
+export interface Session {
+  id: string
+  date: string
+  session_number: number
+  participants: number
+  salt_grilled_count: number
+  takeaway_count: number
+  gutted_count: number
+  loss_count: number
+  discount_amount: number
+  gift_count: number
+  memo: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type Weather = 'sunny' | 'cloudy' | 'rainy' | 'stormy'
+
+export interface DailyRecord {
+  id: string
+  date: string
+  season_id: string | null
+  purchase_count: number
+  purchase_unit_price: number
+  opening_estimated_remaining: number | null
+  closing_estimated_remaining: number | null
+  weather: Weather | null
+  is_holiday: boolean
+  notes: string | null
+  closed_by: string | null
+  closed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ReservationType = 'group_reservation' | 'event' | 'closure'
+
+export interface Reservation {
+  id: string
+  date: string
+  type: ReservationType
+  name: string | null
+  expected_participants: number | null
+  time_slot: string | null
+  memo: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface HistoricalMonthly {
+  id: string
+  year: number
+  month: number
+  total_participants: number
+  total_consumption: number
+  total_revenue: number
+  total_sessions: number
+  memo: string | null
+  created_at: string
+}
+
+export interface EquipmentItem {
+  id: string
+  name: string
+  sort_order: number
+  is_active: boolean
+}
+
+export type EquipmentStatus = 'in_stock' | 'low' | 'order_required' | 'unnecessary' | 'ordered'
+
+export interface EquipmentCheck {
+  id: string
+  date: string
+  equipment_item_id: string
+  status: EquipmentStatus
+  memo: string | null
+  updated_at: string
+  updated_by: string | null
+  equipment_items?: EquipmentItem
+}
+
+export interface SupplierContact {
+  id: string
+  contact_datetime: string
+  memo: string | null
+  has_order: boolean
+  order_count: number | null
+  expected_delivery_date: string | null
+  delivery_confirmed: boolean
+  delivery_confirmed_at: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export type HandoverUrgency = 'normal' | 'caution' | 'urgent'
+
+export interface HandoverMemo {
+  id: string
+  date: string
+  urgency: HandoverUrgency
+  content: string
+  created_by: string | null
+  created_at: string
+  confirmed_by: string | null
+  confirmed_at: string | null
+  staff?: Staff
+}
+
+export type TroubleCategory = 'complaint' | 'trouble' | 'incident' | 'improvement'
+export type TroubleStatus = 'in_progress' | 'resolved' | 'needs_review'
+
+export interface TroubleRecord {
+  id: string
+  occurred_at: string
+  category: TroubleCategory
+  title: string
+  situation: string
+  resolution: string | null
+  status: TroubleStatus
+  admin_note: string | null
+  created_by: string | null
+  updated_by: string | null
+  created_at: string
+  updated_at: string
+  staff?: Staff
+}
+
+export interface Settings {
+  participation_fee: number
+  takeaway_fee: number
+  salt_grilled_fee: number
+  gutted_fee: number
+  stock_alert_threshold: number
+  supplier_name: string
+  supplier_contact_name: string
+  supplier_phone: string
+}
+
+export interface DailySummary {
+  date: string
+  season_id: string | null
+  session_count: number
+  total_participants: number
+  total_salt_grilled: number
+  total_takeaway: number
+  total_consumption: number
+  total_loss: number
+  purchase_count: number
+  purchase_unit_price: number
+  opening_estimated_remaining: number | null
+  closing_estimated_remaining: number | null
+  closed_at: string | null
+}
