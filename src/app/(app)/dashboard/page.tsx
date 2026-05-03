@@ -166,6 +166,36 @@ export default function DashboardPage() {
               <p className="text-2xl font-bold text-green-600">{formatCurrency(summary?.profit ?? 0)}</p>
             </div>
           </div>
+
+          {/* 回別詳細 */}
+          {sessions.length > 0 && settings && (
+            <div className="mt-4 border-t border-slate-100 pt-3 space-y-2">
+              {sessions.map(s => {
+                const sessionRevenue =
+                  s.participants * settings.participation_fee +
+                  s.salt_grilled_count * settings.salt_grilled_fee +
+                  (s.gutted_count ?? 0) * settings.gutted_fee +
+                  s.takeaway_count * settings.takeaway_fee -
+                  (s.discount_amount ?? 0)
+                return (
+                  <Link key={s.id} href={`/sessions/${s.id}/edit`}
+                    className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-50 active:bg-slate-100">
+                    <div>
+                      <span className="text-sm font-bold text-slate-700">{s.session_number}回目</span>
+                      <span className="text-xs text-slate-400 ml-2">{s.participants}名</span>
+                      {s.salt_grilled_count > 0 && <span className="text-xs text-slate-400 ml-1">塩{s.salt_grilled_count}</span>}
+                      {(s.gutted_count ?? 0) > 0 && <span className="text-xs text-slate-400 ml-1">わた{s.gutted_count}</span>}
+                      {s.takeaway_count > 0 && <span className="text-xs text-slate-400 ml-1">持{s.takeaway_count}</span>}
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-bold text-sky-600">{formatCurrency(sessionRevenue)}</span>
+                      <span className="text-xs text-slate-300 ml-1">›</span>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </Card>
 
         {/* 残数・アラート */}
