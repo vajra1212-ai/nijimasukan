@@ -67,6 +67,39 @@ export default function AdminPage() {
           <span className="ml-auto text-xl">›</span>
         </Link>
 
+        {/* 月次損益 */}
+        <Link href="/admin/monthly-pl"
+          className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">
+          <span className="text-2xl">💰</span>
+          <div>
+            <p className="font-bold text-sm text-slate-700">月次損益サマリー</p>
+            <p className="text-xs text-slate-400">売上・原価・人件費・経費の月次利益</p>
+          </div>
+          <span className="ml-auto text-xl text-slate-300">›</span>
+        </Link>
+
+        {/* 経費入力 */}
+        <Link href="/admin/expenses"
+          className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">
+          <span className="text-2xl">🪨</span>
+          <div>
+            <p className="font-bold text-sm text-slate-700">経費入力（炭・備品など）</p>
+            <p className="text-xs text-slate-400">消耗品・光熱費・その他経費</p>
+          </div>
+          <span className="ml-auto text-xl text-slate-300">›</span>
+        </Link>
+
+        {/* マニュアル管理 */}
+        <Link href="/admin/manual"
+          className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">
+          <span className="text-2xl">📖</span>
+          <div>
+            <p className="font-bold text-sm text-slate-700">マニュアル管理</p>
+            <p className="text-xs text-slate-400">手順・セリフ・注意・Q&Aの作成・編集</p>
+          </div>
+          <span className="ml-auto text-xl text-slate-300">›</span>
+        </Link>
+
         {/* 過去データ取込 */}
         <Link href="/admin/import"
           className="flex items-center gap-3 bg-white border border-slate-200 rounded-2xl p-4 active:bg-slate-50">

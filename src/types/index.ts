@@ -179,6 +179,72 @@ export interface Settings {
   current_unit_price: number  // 現在の仕入れ単価（時期ごとに変更可能）
 }
 
+export type ManualCategory = 'weather' | 'purchase' | 'customer' | 'season' | 'general'
+export type ManualFormat = 'procedure' | 'script' | 'caution' | 'qa'
+
+export interface Manual {
+  id: string
+  category: ManualCategory
+  format: ManualFormat
+  title: string
+  content: string
+  importance: 'high' | 'normal'
+  sort_order: number
+  is_active: boolean
+  created_by: string | null
+  updated_at: string
+  created_at: string
+}
+
+export type CustomerType = 'school' | 'company' | 'family' | 'individual' | 'other'
+
+export interface Customer {
+  id: string
+  name: string
+  type: CustomerType
+  contact_name: string | null
+  phone: string | null
+  email: string | null
+  address: string | null
+  notes: string | null
+  first_visit_date: string | null
+  last_visit_date: string | null
+  total_visits: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type ExpenseCategory = 'charcoal' | 'equipment' | 'utility' | 'cleaning' | 'other'
+
+export interface Expense {
+  id: string
+  date: string
+  year_month: string
+  category: ExpenseCategory
+  description: string
+  quantity: number | null
+  unit: string | null
+  unit_price: number | null
+  amount: number
+  created_by: string | null
+  created_at: string
+}
+
+export type DocumentCategory = 'flyer' | 'permit' | 'guide' | 'supplier' | 'other'
+
+export interface StoredDocument {
+  id: string
+  title: string
+  category: DocumentCategory
+  file_url: string
+  file_name: string
+  file_size: number | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+
 export interface PurchasePayment {
   id: string
   year_month: string   // '2025-05'
