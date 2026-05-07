@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { saveToQueue } from '@/lib/offline/queue'
 import { getAuth } from '@/lib/auth'
 import { formatCurrency } from '@/lib/calculations'
-import { Settings } from '@/types'
+import { Settings, CustomerType } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { NumberInput } from '@/components/ui/NumberInput'
 import { Button } from '@/components/ui/Button'
@@ -42,6 +42,7 @@ export default function NewSessionPage() {
   const [giftCount, setGiftCount] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
   const [memo, setMemo] = useState('')
+  const [customerType, setCustomerType] = useState<CustomerType | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [usedNumbers, setUsedNumbers] = useState<number[]>([])
   const [saving, setSaving] = useState(false)
@@ -87,6 +88,7 @@ export default function NewSessionPage() {
       gift_count: giftCount,
       discount_amount: discountAmount,
       memo: memo || null,
+      customer_type: customerType,
       created_by: auth?.staffId ?? null,
     }
 
@@ -150,6 +152,34 @@ export default function NewSessionPage() {
         </div>
 
         <NumberInput label="参加人数" value={participants} onChange={setParticipants} unit="名" />
+
+        {/* 客層 */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <p className="text-sm font-semibold text-slate-600 mb-2">客層（任意）</p>
+          <div className="grid grid-cols-5 gap-1.5">
+            {([
+              ['family',     '👨‍👩‍👧', '家族'],
+              ['school',     '🏫', '学校'],
+              ['company',    '🏢', '企業'],
+              ['individual', '👤', '個人'],
+              ['other',      '🎯', 'その他'],
+            ] as [CustomerType, string, string][]).map(([val, icon, label]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setCustomerType(customerType === val ? null : val)}
+                className={`flex flex-col items-center py-2 rounded-xl border text-xs font-medium transition-colors ${
+                  customerType === val
+                    ? 'bg-purple-500 text-white border-purple-500'
+                    : 'bg-white text-slate-600 border-slate-200 active:bg-slate-50'
+                }`}
+              >
+                <span className="text-lg leading-tight">{icon}</span>
+                <span className="mt-0.5">{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* 販売区分 */}
         <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">

@@ -108,6 +108,43 @@ export default function MonthlyPLPage() {
   const operatingProfit = totalRevenue - purchaseCost - laborCost - totalExpenses
   const margin          = totalRevenue > 0 ? Math.round(operatingProfit / totalRevenue * 1000) / 10 : 0
 
+  // 月次レポートテキスト自動生成
+  const generateReport = () => {
+    const m = month.replace('-', '年') + '月'
+    const totalPax = sessions.reduce((s, r) => s + r.participants, 0)
+    const lines = [
+      `【${m} 月次レポート】`,
+      ``,
+      `■ 売上`,
+      `　合計売上：${formatCurrency(totalRevenue)}`,
+      `　参加料：${formatCurrency(participationRev)}`,
+      `　塩焼き：${formatCurrency(saltGrilledRev)}`,
+      `　わた出し：${formatCurrency(guttedRev)}`,
+      `　持ち帰り：${formatCurrency(takeawayRev)}`,
+      discountTotal > 0 ? `　値引き：▲${formatCurrency(discountTotal)}` : null,
+      ``,
+      `■ コスト`,
+      `　仕入れ原価：▲${formatCurrency(purchaseCost)}`,
+      `　人件費：▲${formatCurrency(laborCost)}`,
+      totalExpenses > 0 ? `　消耗品・経費：▲${formatCurrency(totalExpenses)}` : null,
+      ``,
+      `■ 利益`,
+      `　粗利（原価のみ）：${formatCurrency(grossProfit)}`,
+      `　月次利益：${formatCurrency(operatingProfit)}`,
+      `　利益率：${margin}%`,
+      ``,
+      `■ 実績`,
+      `　累計参加者：${totalPax}名`,
+      `　開催回数：${sessions.length}回`,
+      ``,
+      `以上`,
+    ].filter(l => l !== null).join('\n')
+
+    navigator.clipboard.writeText(lines).then(() => {
+      alert('レポートをコピーしました！LINEやメールに貼り付けてください。')
+    })
+  }
+
   const Row = ({ label, value, sub, bold, color }: { label: string; value: number; sub?: boolean; bold?: boolean; color?: string }) => (
     <div className={`flex justify-between items-center ${sub ? 'pl-4 text-slate-500' : ''}`}>
       <span className={`text-sm ${bold ? 'font-bold text-slate-800' : 'text-slate-600'}`}>{label}</span>
@@ -202,6 +239,20 @@ export default function MonthlyPLPage() {
                 </p>
               </Card>
             </div>
+
+            {/* 月次レポートコピー */}
+            {totalRevenue > 0 && (
+              <button
+                onClick={generateReport}
+                className="w-full flex items-center gap-3 bg-slate-700 text-white rounded-2xl p-4 active:bg-slate-800">
+                <span className="text-2xl">📋</span>
+                <div className="text-left">
+                  <p className="text-sm font-bold">月次レポートをコピー</p>
+                  <p className="text-xs opacity-70">LINEやメールにそのまま貼り付けできます</p>
+                </div>
+                <span className="ml-auto text-xl opacity-50">›</span>
+              </button>
+            )}
 
             {/* 経費入力へのリンク */}
             <Link href="/admin/expenses"

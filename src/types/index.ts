@@ -28,6 +28,7 @@ export interface Session {
   loss_count: number
   discount_amount: number
   gift_count: number
+  customer_type: CustomerType | null
   memo: string | null
   created_by: string | null
   created_at: string

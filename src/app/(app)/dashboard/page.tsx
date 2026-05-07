@@ -45,6 +45,7 @@ export default function DashboardPage() {
   const [confirmingHandover, setConfirmingHandover] = useState(false)
   const [confirmingDelivery, setConfirmingDelivery] = useState(false)
   const [monthlyCharcoalCost, setMonthlyCharcoalCost] = useState(0)
+  const [tomorrowEstimate, setTomorrowEstimate] = useState<{ dow: number; avgConsumption: number; sampleSize: number } | null>(null)
 
   const fetchData = useCallback(async () => {
     const supabase = createClient()
@@ -63,6 +64,7 @@ export default function DashboardPage() {
       { data: equipCheckData },
       { data: todayHandoverData },
       { data: charcoalData },
+      { data: dowData },
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
@@ -81,6 +83,8 @@ export default function DashboardPage() {
       supabase.from('equipment_checks').select('id').eq('date', date).limit(1),
       supabase.from('handover_memos').select('id').eq('date', date).single(),
       supabase.from('expenses').select('amount').eq('year_month', date.slice(0, 7)).eq('category', 'charcoal'),
+      // 過去4週間の曜日別消費データ
+      supabase.from('daily_summary').select('date, total_consumption').gte('date', (() => { const d = new Date(); d.setDate(d.getDate() - 28); return d.toLocaleDateString('sv-SE') })()).lte('date', date).order('date', { ascending: false }),
     ])
 
     setSessions((sessionsData as Session[]) ?? [])
@@ -99,6 +103,17 @@ export default function DashboardPage() {
     setMonthlyCharcoalCost(
       ((charcoalData ?? []) as { amount: number }[]).reduce((s, r) => s + r.amount, 0)
     )
+
+    // 明日の曜日で消費量を予測
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowDow = tomorrow.getDay()
+    const dowRows = (dowData ?? []) as { date: string; total_consumption: number }[]
+    const sameDowRows = dowRows.filter(r => new Date(r.date + 'T00:00:00').getDay() === tomorrowDow)
+    if (sameDowRows.length > 0) {
+      const dowAvg = Math.round(sameDowRows.reduce((s, r) => s + r.total_consumption, 0) / sameDowRows.length)
+      setTomorrowEstimate({ dow: tomorrowDow, avgConsumption: dowAvg, sampleSize: sameDowRows.length })
+    }
+
     setLoading(false)
   }, [])
 
@@ -297,13 +312,30 @@ export default function DashboardPage() {
                   前日繰越{prevDayClosing ?? '?'}匹 + 仕入れ{dailyRecord?.purchase_count ?? 0}匹 − 本日消費{todayConsumption}匹
                 </p>
               )}
-              {forecast && (
-                <div className="mt-2 space-y-1 text-sm text-slate-600 border-t border-slate-200 pt-2">
-                  <p>平均消費 {forecast.avgConsumption}匹/日</p>
-                  {forecast.daysUntilShortage <= 3 && (
-                    <p className="text-red-600 font-semibold">⚠️ 約{Math.max(0, forecast.daysUntilShortage)}日後に不足予測</p>
+              {(forecast || tomorrowEstimate) && (
+                <div className="mt-2 space-y-1.5 text-sm text-slate-600 border-t border-slate-200 pt-2">
+                  <p className="text-xs text-slate-400">直近3日平均消費 {forecast?.avgConsumption ?? 0}匹/日</p>
+                  {tomorrowEstimate && (
+                    <div className="bg-amber-50 rounded-xl px-3 py-2">
+                      <p className="text-xs font-semibold text-amber-700">
+                        📅 明日（{['日','月','火','水','木','金','土'][tomorrowEstimate.dow]}曜日）の予測
+                      </p>
+                      <p className="text-sm font-bold text-amber-800 mt-0.5">
+                        消費見込み 約{tomorrowEstimate.avgConsumption}匹
+                        <span className="text-xs font-normal text-amber-600 ml-1">（過去{tomorrowEstimate.sampleSize}回の{['日','月','火','水','木','金','土'][tomorrowEstimate.dow]}曜平均）</span>
+                      </p>
+                      {currentStock !== null && (
+                        <p className={`text-xs mt-0.5 font-medium ${currentStock - tomorrowEstimate.avgConsumption < (settings?.stock_alert_threshold ?? 100) ? 'text-red-600' : 'text-green-600'}`}>
+                          明日後の残数予測：約{Math.max(0, currentStock - tomorrowEstimate.avgConsumption)}匹
+                          {currentStock - tomorrowEstimate.avgConsumption < (settings?.stock_alert_threshold ?? 100) ? ' ⚠️ 仕入れ要検討' : ' ✅'}
+                        </p>
+                      )}
+                    </div>
                   )}
-                  {isLowStock && (
+                  {forecast && forecast.daysUntilShortage <= 3 && (
+                    <p className="text-red-600 font-semibold text-xs">⚠️ 約{Math.max(0, forecast.daysUntilShortage)}日後に不足予測</p>
+                  )}
+                  {isLowStock && forecast && (
                     <p className="text-red-600 font-semibold">推奨仕入れ：{forecast.recommendedOrder}匹以上</p>
                   )}
                 </div>
