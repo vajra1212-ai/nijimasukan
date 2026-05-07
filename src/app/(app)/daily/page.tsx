@@ -11,9 +11,9 @@ import { NumberInput } from '@/components/ui/NumberInput'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
-function today() { return new Date().toLocaleDateString('sv-SE') }
-function yesterday() {
-  const d = new Date()
+function todayStr() { return new Date().toLocaleDateString('sv-SE') }
+function prevDay(dateStr: string): string {
+  const d = new Date(dateStr)
   d.setDate(d.getDate() - 1)
   return d.toLocaleDateString('sv-SE')
 }
@@ -44,6 +44,9 @@ interface ShiftEntry {
 export default function DailyPage() {
   const router = useRouter()
 
+  // 日付（過去遡り対応）
+  const [date, setDate] = useState(todayStr())
+
   // 仕入れ
   const [purchase, setPurchase] = useState(0)
   const [purchaseWeightKg, setPurchaseWeightKg] = useState('')
@@ -72,7 +75,6 @@ export default function DailyPage() {
 
   const fetchData = useCallback(async () => {
     const supabase = createClient()
-    const date = today()
     const auth = getAuth()
 
     const [
@@ -88,7 +90,7 @@ export default function DailyPage() {
       supabase.from('daily_records').select('*').eq('date', date).single(),
       supabase.from('daily_records')
         .select('closing_estimated_remaining')
-        .eq('date', yesterday())
+        .eq('date', prevDay(date))
         .single(),
       supabase.from('settings').select('*'),
       supabase.from('staff').select('id, name').eq('is_active', true),
@@ -138,7 +140,7 @@ export default function DailyPage() {
         shiftId: existing?.id,
       }
     }))
-  }, [])
+  }, [date])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -179,7 +181,6 @@ export default function DailyPage() {
   const handleSave = async (close: boolean) => {
     setSaving(true)
     const supabase = createClient()
-    const date = today()
     const auth = getAuth()
 
     const payload: Partial<DailyRecord> = {
@@ -236,6 +237,34 @@ export default function DailyPage() {
     <div className="max-w-lg mx-auto">
       <PageHeader title="日次入力（締め）" showBack />
       <div className="p-4 space-y-3">
+
+        {/* 日付選択 */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <label className="block text-sm text-slate-500 mb-1">日付</label>
+          <input
+            type="date"
+            value={date}
+            max={todayStr()}
+            onChange={e => {
+              setDate(e.target.value)
+              setExistingRecord(null)
+              setOpening(0)
+              setOpeningSource('auto')
+              setPrevClosing(null)
+              setPurchase(0)
+              setPurchaseWeightKg('')
+              setPurchaseTotalAmount('')
+              setWeather('')
+              setIsHoliday(false)
+              setNotes('')
+              setSaved(false)
+            }}
+            className="w-full text-base font-semibold text-slate-800 bg-transparent outline-none"
+          />
+          {date !== todayStr() && (
+            <p className="text-xs text-amber-600 mt-1">⚠️ 過去日付の入力です（{date}）</p>
+          )}
+        </div>
 
         {/* 仕入れ */}
         <Card>

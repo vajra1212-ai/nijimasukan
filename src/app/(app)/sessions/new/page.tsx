@@ -32,6 +32,7 @@ function loadSettings(raw: { key: string; value: string }[]): Settings {
 
 export default function NewSessionPage() {
   const router = useRouter()
+  const [date, setDate] = useState(today())
   const [sessionNumber, setSessionNumber] = useState<number | null>(null)
   const [participants, setParticipants] = useState(0)
   const [saltGrilled, setSaltGrilled] = useState(0)
@@ -50,12 +51,13 @@ export default function NewSessionPage() {
     const supabase = createClient()
     Promise.all([
       supabase.from('settings').select('*'),
-      supabase.from('sessions').select('session_number').eq('date', today()),
+      supabase.from('sessions').select('session_number').eq('date', date),
     ]).then(([{ data: settingsData }, { data: sessionData }]) => {
       if (settingsData) setSettings(loadSettings(settingsData as { key: string; value: string }[]))
       setUsedNumbers((sessionData ?? []).map((s: { session_number: number }) => s.session_number))
+      setSessionNumber(null) // 日付変更時は回数をリセット
     })
-  }, [])
+  }, [date])
 
   const consumption = saltGrilled + takeaway + gutted + giftCount
   const revenue = settings
@@ -75,7 +77,7 @@ export default function NewSessionPage() {
 
     const auth = getAuth()
     const data = {
-      date: today(),
+      date,
       session_number: sessionNumber,
       participants,
       salt_grilled_count: saltGrilled,
@@ -107,6 +109,21 @@ export default function NewSessionPage() {
     <div className="max-w-lg mx-auto">
       <PageHeader title="開催回入力" showBack />
       <div className="p-4 space-y-3">
+
+        {/* 日付選択 */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <label className="block text-sm text-slate-500 mb-1">日付</label>
+          <input
+            type="date"
+            value={date}
+            max={today()}
+            onChange={e => setDate(e.target.value)}
+            className="w-full text-base font-semibold text-slate-800 bg-transparent outline-none"
+          />
+          {date !== today() && (
+            <p className="text-xs text-amber-600 mt-1">⚠️ 過去日付の入力です（{date}）</p>
+          )}
+        </div>
 
         {/* 開催回選択 */}
         <div className="bg-white rounded-2xl border border-slate-200 p-4">
