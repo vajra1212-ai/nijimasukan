@@ -44,6 +44,7 @@ export default function DashboardPage() {
   const [todayHandoverDone, setTodayHandoverDone] = useState(false)
   const [confirmingHandover, setConfirmingHandover] = useState(false)
   const [confirmingDelivery, setConfirmingDelivery] = useState(false)
+  const [monthlyCharcoalCost, setMonthlyCharcoalCost] = useState(0)
 
   const fetchData = useCallback(async () => {
     const supabase = createClient()
@@ -61,6 +62,7 @@ export default function DashboardPage() {
       { data: shiftsData },
       { data: equipCheckData },
       { data: todayHandoverData },
+      { data: charcoalData },
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
@@ -78,6 +80,7 @@ export default function DashboardPage() {
       supabase.from('work_shifts').select('*, part_timers(name, hourly_wage)').eq('date', date),
       supabase.from('equipment_checks').select('id').eq('date', date).limit(1),
       supabase.from('handover_memos').select('id').eq('date', date).single(),
+      supabase.from('expenses').select('amount').eq('year_month', date.slice(0, 7)).eq('category', 'charcoal'),
     ])
 
     setSessions((sessionsData as Session[]) ?? [])
@@ -93,6 +96,9 @@ export default function DashboardPage() {
     setWorkShifts((shiftsData as WorkShift[]) ?? [])
     setEquipmentCheckedToday((equipCheckData ?? []).length > 0)
     setTodayHandoverDone(!!todayHandoverData)
+    setMonthlyCharcoalCost(
+      ((charcoalData ?? []) as { amount: number }[]).reduce((s, r) => s + r.amount, 0)
+    )
     setLoading(false)
   }, [])
 
@@ -417,6 +423,20 @@ export default function DashboardPage() {
               <p className="font-bold">⚠️ 要発注備品あり：{orderRequiredCount}件</p>
               <p className="text-sm mt-0.5">タップして確認 →</p>
             </AlertCard>
+          </Link>
+        )}
+
+        {/* 今月の炭代 */}
+        {monthlyCharcoalCost > 0 && (
+          <Link href="/admin/monthly-pl">
+            <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl p-3 active:bg-orange-100">
+              <span className="text-2xl">🔥</span>
+              <div className="flex-1">
+                <p className="text-xs text-orange-600 font-medium">今月の炭代</p>
+                <p className="text-lg font-bold text-orange-700">{formatCurrency(monthlyCharcoalCost)}</p>
+              </div>
+              <span className="text-xs text-orange-400">月次損益 ›</span>
+            </div>
           </Link>
         )}
 

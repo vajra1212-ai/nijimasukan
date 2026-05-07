@@ -69,6 +69,11 @@ export default function DailyPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // 炭
+  const [charcoalQty, setCharcoalQty] = useState(0)
+  const [charcoalUnitPrice, setCharcoalUnitPrice] = useState('')
+  const [charcoalExpenseId, setCharcoalExpenseId] = useState<string | null>(null)
+
   // アルバイト出勤
   const [partTimers, setPartTimers] = useState<PartTimer[]>([])
   const [shifts, setShifts] = useState<ShiftEntry[]>([])
@@ -85,6 +90,7 @@ export default function DailyPage() {
       { data: staff },
       { data: ptData },
       { data: shiftsData },
+      { data: charcoalData },
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
@@ -96,12 +102,25 @@ export default function DailyPage() {
       supabase.from('staff').select('id, name').eq('is_active', true),
       supabase.from('part_timers').select('*').eq('is_active', true).order('created_at'),
       supabase.from('work_shifts').select('*').eq('date', date),
+      supabase.from('expenses').select('*').eq('date', date).eq('category', 'charcoal').maybeSingle(),
     ])
 
     setSessions((sessionsData as Session[]) ?? [])
     setSettings(settingsData ? loadSettings(settingsData as { key: string; value: string }[]) : null)
     setStaffList((staff as { id: string; name: string }[]) ?? [])
     setClosedBy(auth?.staffId ?? '')
+
+    // 炭の既存データ
+    if (charcoalData) {
+      const c = charcoalData as { id: string; quantity: number | null; unit_price: number | null }
+      setCharcoalExpenseId(c.id)
+      setCharcoalQty(c.quantity ?? 0)
+      setCharcoalUnitPrice(c.unit_price != null ? String(c.unit_price) : '')
+    } else {
+      setCharcoalExpenseId(null)
+      setCharcoalQty(0)
+      setCharcoalUnitPrice('')
+    }
 
     const prevRec = prevDr as { closing_estimated_remaining: number | null } | null
     const prevClose = prevRec?.closing_estimated_remaining ?? null
@@ -143,6 +162,9 @@ export default function DailyPage() {
   }, [date])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // 炭コスト
+  const charcoalCost = charcoalQty * (parseInt(charcoalUnitPrice) || 0)
 
   // ---- 計算 ----
   // 単価：支払金額÷匹数 → なければ設定の基準単価を使用
@@ -212,6 +234,32 @@ export default function DailyPage() {
       })
     }
 
+    // 炭の経費を保存
+    if (charcoalQty > 0) {
+      const charcoalAmount = charcoalQty * (parseInt(charcoalUnitPrice) || 0)
+      const charcoalPayload = {
+        date,
+        year_month: date.slice(0, 7),
+        category: 'charcoal',
+        description: '炭',
+        quantity: charcoalQty,
+        unit: '袋',
+        unit_price: charcoalUnitPrice ? parseInt(charcoalUnitPrice) : null,
+        amount: charcoalAmount,
+        created_by: auth?.staffId ?? null,
+      }
+      if (charcoalExpenseId) {
+        await supabase.from('expenses').update(charcoalPayload).eq('id', charcoalExpenseId)
+      } else {
+        const { data: inserted } = await supabase.from('expenses').insert(charcoalPayload).select('id').single()
+        if (inserted) setCharcoalExpenseId((inserted as { id: string }).id)
+      }
+    } else if (charcoalExpenseId) {
+      // 0袋に変更した場合は削除
+      await supabase.from('expenses').delete().eq('id', charcoalExpenseId)
+      setCharcoalExpenseId(null)
+    }
+
     // 出勤記録を保存
     for (const s of shifts) {
       if (s.worked) {
@@ -258,6 +306,9 @@ export default function DailyPage() {
               setIsHoliday(false)
               setNotes('')
               setSaved(false)
+              setCharcoalQty(0)
+              setCharcoalUnitPrice('')
+              setCharcoalExpenseId(null)
             }}
             className="w-full text-base font-semibold text-slate-800 bg-transparent outline-none"
           />
@@ -392,6 +443,47 @@ export default function DailyPage() {
           </Card>
         )}
 
+        {/* 炭の使用量 */}
+        <Card>
+          <h3 className="text-sm font-semibold text-slate-500 mb-3">🔥 炭の使用量</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-400">使用袋数</label>
+              <div className="flex items-center gap-1 border-b border-slate-200 pb-1 mt-1">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={charcoalQty || ''}
+                  onChange={e => setCharcoalQty(parseInt(e.target.value) || 0)}
+                  placeholder="0"
+                  className="flex-1 text-sm bg-transparent outline-none"
+                />
+                <span className="text-xs text-slate-400 shrink-0">袋</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">単価（円）</label>
+              <div className="flex items-center gap-1 border-b border-slate-200 pb-1 mt-1">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={charcoalUnitPrice}
+                  onChange={e => setCharcoalUnitPrice(e.target.value)}
+                  placeholder="例：600"
+                  className="flex-1 text-sm bg-transparent outline-none"
+                />
+                <span className="text-xs text-slate-400 shrink-0">円</span>
+              </div>
+            </div>
+          </div>
+          {charcoalCost > 0 && (
+            <div className="mt-2 flex justify-between items-center text-sm bg-orange-50 rounded-xl px-3 py-2">
+              <span className="text-slate-600">本日の炭代</span>
+              <span className="font-bold text-orange-600">{formatCurrency(charcoalCost)}</span>
+            </div>
+          )}
+        </Card>
+
         {/* 集計 */}
         {summary && (
           <Card>
@@ -424,8 +516,13 @@ export default function DailyPage() {
                   <span>人件費</span><span>▲{formatCurrency(laborCost)}</span>
                 </div>
               )}
-              <div className={`flex justify-between font-bold text-base ${summary.profit - laborCost >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                <span>粗利</span><span>{formatCurrency(summary.profit - laborCost)}</span>
+              {charcoalCost > 0 && (
+                <div className="flex justify-between font-bold text-orange-600">
+                  <span>🔥 炭代</span><span>▲{formatCurrency(charcoalCost)}</span>
+                </div>
+              )}
+              <div className={`flex justify-between font-bold text-base ${summary.profit - laborCost - charcoalCost >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <span>粗利</span><span>{formatCurrency(summary.profit - laborCost - charcoalCost)}</span>
               </div>
             </div>
           </Card>
