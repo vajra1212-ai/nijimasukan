@@ -10,14 +10,6 @@ import { getAuth } from '@/lib/auth'
 
 type InvoiceType = 'delivery_note' | 'invoice'
 
-interface LineItem {
-  name: string
-  quantity: number
-  unit: string
-  unit_price: number
-  amount: number
-}
-
 interface Invoice {
   id: string
   type: InvoiceType
@@ -32,7 +24,6 @@ interface Invoice {
   file_url: string | null
   file_name: string | null
   notes: string | null
-  line_items: LineItem[] | null
   created_at: string
 }
 
@@ -45,7 +36,7 @@ const typeBadge: Record<InvoiceType, string> = {
   invoice:       'bg-purple-100 text-purple-700',
 }
 
-/** 翌月末日を計算 */
+/** 翌月末日を計算（月締め翌月末払い） */
 function getPaymentDueDate(billingMonth: string): string {
   const [y, m] = billingMonth.split('-').map(Number)
   const nextM = m === 12 ? 1 : m + 1
@@ -59,27 +50,24 @@ function todayStr() { return new Date().toLocaleDateString('sv-SE') }
 const BUCKET = 'documents'
 
 export default function PaymentsPage() {
-  const [invoices, setInvoices] = useState<Invoice[]>([])
-  const [loading, setLoading] = useState(true)
-  const [showUpload, setShowUpload] = useState(false)
-  const [showPaid, setShowPaid] = useState(false)
+  const [invoices, setInvoices]   = useState<Invoice[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [showForm, setShowForm]   = useState(false)
+  const [showPaid, setShowPaid]   = useState(false)
+  const [saving, setSaving]       = useState(false)
 
-  // アップロード・OCR 状態
-  const [file, setFile] = useState<File | null>(null)
-  const [ocrLoading, setOcrLoading] = useState(false)
-  const [ocrWarning, setOcrWarning] = useState('')
-  const [formReady, setFormReady] = useState(false)
-  const [saving, setSaving] = useState(false)
+  // 写真プレビュー
+  const [file, setFile]           = useState<File | null>(null)
+  const [preview, setPreview]     = useState<string | null>(null)
 
   // フォーム
-  const [invoiceType, setInvoiceType]   = useState<InvoiceType>('invoice')
-  const [companyName, setCompanyName]   = useState('')
-  const [invoiceNumber, setInvoiceNumber] = useState('')
-  const [invoiceDate, setInvoiceDate]   = useState(todayStr())
-  const [amount, setAmount]             = useState('')
-  const [billingMonth, setBillingMonth] = useState(todayStr().slice(0, 7))
-  const [notes, setNotes]               = useState('')
-  const [lineItems, setLineItems]       = useState<LineItem[]>([])
+  const [invoiceType, setInvoiceType]       = useState<InvoiceType>('invoice')
+  const [companyName, setCompanyName]       = useState('')
+  const [invoiceNumber, setInvoiceNumber]   = useState('')
+  const [invoiceDate, setInvoiceDate]       = useState(todayStr())
+  const [amount, setAmount]                 = useState('')
+  const [billingMonth, setBillingMonth]     = useState(todayStr().slice(0, 7))
+  const [notes, setNotes]                   = useState('')
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -97,95 +85,20 @@ export default function PaymentsPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // ─── ファイル選択 → 自動 OCR ───
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ─── 写真選択 → プレビュー表示 ───
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
     setFile(f)
-    setFormReady(false)
-    setOcrWarning('')
-    setOcrLoading(true)
-
-    try {
-      const fd = new FormData()
-      fd.append('file', f)
-      const res = await fetch('/api/ocr-invoice', { method: 'POST', body: fd })
-      const ocr = await res.json()
-
-      if (ocr._warning) setOcrWarning(ocr._warning)
-      if (ocr.company_name)  setCompanyName(ocr.company_name)
-      if (ocr.invoice_number) setInvoiceNumber(ocr.invoice_number)
-      if (ocr.invoice_date) {
-        setInvoiceDate(ocr.invoice_date)
-        setBillingMonth(ocr.invoice_date.slice(0, 7))
-      }
-      if (ocr.amount && ocr.amount > 0) setAmount(String(ocr.amount))
-      if (ocr.type === 'delivery_note' || ocr.type === 'invoice') setInvoiceType(ocr.type)
-      if (Array.isArray(ocr.line_items) && ocr.line_items.length > 0) setLineItems(ocr.line_items)
-    } catch {
-      setOcrWarning('OCR に失敗しました。手動で入力してください。')
-    } finally {
-      setOcrLoading(false)
-      setFormReady(true)
-    }
-  }
-
-  // ─── 手入力モード ───
-  const handleManualEntry = () => {
-    setFormReady(true)
-    setFile(null)
-    if (fileRef.current) fileRef.current.value = ''
-  }
-
-  // ─── 保存 ───
-  const handleSave = async () => {
-    if (!companyName.trim() || !amount) return
-    setSaving(true)
-    const supabase = createClient()
-    const auth = getAuth()
-
-    let fileUrl: string | null = null
-    let fileName: string | null = null
-
-    if (file) {
-      const ext = file.name.split('.').pop() ?? 'jpg'
-      const path = `invoices/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-      const { data: up } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: false })
-      if (up) {
-        const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path)
-        fileUrl = urlData.publicUrl
-        fileName = file.name
-      }
-    }
-
-    const paymentDueDate = getPaymentDueDate(billingMonth)
-
-    await supabase.from('invoices').insert({
-      type: invoiceType,
-      company_name: companyName.trim(),
-      invoice_number: invoiceNumber.trim() || null,
-      invoice_date: invoiceDate || null,
-      received_date: todayStr(),
-      billing_month: billingMonth,
-      amount: parseInt(amount) || 0,
-      payment_due_date: paymentDueDate,
-      file_url: fileUrl,
-      file_name: fileName,
-      notes: notes.trim() || null,
-      line_items: lineItems.length > 0 ? lineItems : null,
-      created_by: auth?.staffId ?? null,
-    })
-
-    setSaving(false)
-    resetForm()
-    setShowUpload(false)
-    fetchData()
+    const url = URL.createObjectURL(f)
+    setPreview(url)
+    // 書類日付から請求月を自動セット（今日の月をデフォルト）
+    setBillingMonth(todayStr().slice(0, 7))
   }
 
   const resetForm = () => {
     setFile(null)
-    setOcrWarning('')
-    setFormReady(false)
+    setPreview(null)
     setInvoiceType('invoice')
     setCompanyName('')
     setInvoiceNumber('')
@@ -193,11 +106,54 @@ export default function PaymentsPage() {
     setAmount('')
     setBillingMonth(todayStr().slice(0, 7))
     setNotes('')
-    setLineItems([])
     if (fileRef.current) fileRef.current.value = ''
   }
 
-  // ─── 支払済みにする ───
+  // ─── 保存 ───
+  const handleSave = async () => {
+    if (!companyName.trim() || !amount || parseInt(amount) <= 0) return
+    setSaving(true)
+    const supabase = createClient()
+    const auth = getAuth()
+
+    let fileUrl: string | null = null
+    let fileName: string | null = null
+
+    // 写真をSupabase Storageにアップロード（無料枠1GB）
+    if (file) {
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      const path = `invoices/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { data: up } = await supabase.storage
+        .from(BUCKET)
+        .upload(path, file, { upsert: false })
+      if (up) {
+        const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path)
+        fileUrl = urlData.publicUrl
+        fileName = file.name
+      }
+    }
+
+    await supabase.from('invoices').insert({
+      type:             invoiceType,
+      company_name:     companyName.trim(),
+      invoice_number:   invoiceNumber.trim() || null,
+      invoice_date:     invoiceDate || null,
+      received_date:    todayStr(),
+      billing_month:    billingMonth,
+      amount:           parseInt(amount),
+      payment_due_date: getPaymentDueDate(billingMonth),
+      file_url:         fileUrl,
+      file_name:        fileName,
+      notes:            notes.trim() || null,
+      created_by:       auth?.staffId ?? null,
+    })
+
+    setSaving(false)
+    resetForm()
+    setShowForm(false)
+    fetchData()
+  }
+
   const handleMarkPaid = async (inv: Invoice) => {
     const supabase = createClient()
     const auth = getAuth()
@@ -215,17 +171,15 @@ export default function PaymentsPage() {
   }
 
   // ─── 集計 ───
-  const today = todayStr()
+  const today         = todayStr()
   const endOfThisMonth = getPaymentDueDate(today.slice(0, 7))
-
-  const unpaid     = invoices.filter(i => !i.paid_at)
-  const paid       = invoices.filter(i => i.paid_at)
-  const overdue    = unpaid.filter(i => i.payment_due_date < today)
-  const thisMonth  = unpaid.filter(i => i.payment_due_date >= today && i.payment_due_date <= endOfThisMonth)
-  const later      = unpaid.filter(i => i.payment_due_date > endOfThisMonth)
-
-  const unpaidTotal  = unpaid.reduce((s, i) => s + i.amount, 0)
-  const overdueTotal = overdue.reduce((s, i) => s + i.amount, 0)
+  const unpaid        = invoices.filter(i => !i.paid_at)
+  const paid          = invoices.filter(i =>  i.paid_at)
+  const overdue       = unpaid.filter(i => i.payment_due_date < today)
+  const thisMonth     = unpaid.filter(i => i.payment_due_date >= today && i.payment_due_date <= endOfThisMonth)
+  const later         = unpaid.filter(i => i.payment_due_date > endOfThisMonth)
+  const unpaidTotal   = unpaid.reduce((s, i) => s + i.amount, 0)
+  const overdueTotal  = overdue.reduce((s, i) => s + i.amount, 0)
 
   return (
     <div className="max-w-lg mx-auto">
@@ -234,7 +188,7 @@ export default function PaymentsPage() {
         showBack
         right={
           <button
-            onClick={() => { setShowUpload(v => !v); if (showUpload) resetForm() }}
+            onClick={() => { setShowForm(v => !v); if (showForm) resetForm() }}
             className="text-sm bg-sky-500 text-white px-3 py-1.5 rounded-lg font-medium"
           >
             ＋ 追加
@@ -244,195 +198,164 @@ export default function PaymentsPage() {
 
       <div className="p-4 space-y-4">
 
-        {/* ─── アップロード・OCR フォーム ─── */}
-        {showUpload && (
+        {/* ─── 登録フォーム ─── */}
+        {showForm && (
           <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl p-4 space-y-4">
-            <h3 className="font-semibold text-slate-700">📷 納品書・請求書を登録</h3>
+            <h3 className="font-semibold text-slate-700">📄 納品書・請求書を登録</h3>
 
-            {/* カメラ撮影 or ファイル選択 */}
-            {!formReady && !ocrLoading && (
-              <div className="space-y-3">
-                <div className="text-center bg-white border-2 border-dashed border-sky-300 rounded-2xl p-6">
-                  <p className="text-3xl mb-2">📷</p>
-                  <p className="text-sm font-semibold text-slate-700">書類を撮影・選択</p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    AIが会社名・金額・日付を自動で読み取ります
-                  </p>
-                  <label className="mt-3 inline-block cursor-pointer bg-sky-500 text-white text-sm font-medium px-4 py-2 rounded-xl">
-                    📷 カメラ or ファイルを選ぶ
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/*,application/pdf,.heic"
-                      capture="environment"
-                      onChange={handleFileSelect}
-                      className="hidden"
-                    />
-                  </label>
+            {/* 写真プレビュー + 撮影ボタン */}
+            <div>
+              {preview ? (
+                <div className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={preview}
+                    alt="書類プレビュー"
+                    className="w-full max-h-48 object-contain bg-slate-100 rounded-xl border border-slate-200"
+                  />
+                  <button
+                    onClick={() => { setFile(null); setPreview(null); if (fileRef.current) fileRef.current.value = '' }}
+                    className="absolute top-2 right-2 bg-white text-slate-600 text-xs px-2 py-1 rounded-lg border border-slate-200 shadow-sm"
+                  >
+                    撮り直す
+                  </button>
                 </div>
-                <button
-                  onClick={handleManualEntry}
-                  className="w-full text-sm text-slate-500 py-2 border border-dashed border-slate-300 rounded-xl"
-                >
-                  写真なしで手入力する →
+              ) : (
+                <label className="flex flex-col items-center gap-2 p-5 bg-white border-2 border-dashed border-slate-300 rounded-2xl cursor-pointer active:bg-slate-50">
+                  <span className="text-3xl">📷</span>
+                  <span className="text-sm font-medium text-slate-600">書類を撮影・選択（任意）</span>
+                  <span className="text-xs text-slate-400">写真は証拠として保存されます</span>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*,.heic"
+                    capture="environment"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
+
+            {/* 種別 */}
+            <div className="flex gap-2">
+              {(['invoice', 'delivery_note'] as InvoiceType[]).map(t => (
+                <button key={t} type="button" onClick={() => setInvoiceType(t)}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
+                    invoiceType === t
+                      ? 'bg-sky-500 text-white border-sky-500'
+                      : 'bg-white text-slate-600 border-slate-200'
+                  }`}>
+                  {typeLabels[t]}
                 </button>
+              ))}
+            </div>
+
+            {/* 会社名 */}
+            <div>
+              <label className="text-xs font-medium text-slate-500">
+                会社名・業者名 <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={companyName}
+                onChange={e => setCompanyName(e.target.value)}
+                placeholder="例：ニジマス水産株式会社"
+                className="w-full mt-1 text-sm bg-white border border-slate-200 rounded-xl px-3 py-2.5 outline-none"
+              />
+            </div>
+
+            {/* 金額 */}
+            <div>
+              <label className="text-xs font-medium text-slate-500">
+                金額（税込） <span className="text-red-400">*</span>
+              </label>
+              <div className="flex items-center mt-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+                <span className="text-slate-400 mr-1">¥</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  placeholder="120000"
+                  className="flex-1 text-xl font-bold text-slate-800 outline-none"
+                />
               </div>
-            )}
+              {amount && parseInt(amount) > 0 && (
+                <p className="text-right text-sm font-bold text-sky-600 mt-1">
+                  {formatCurrency(parseInt(amount))}
+                </p>
+              )}
+            </div>
 
-            {/* OCR 読み取り中 */}
-            {ocrLoading && (
-              <div className="text-center py-8">
-                <p className="text-3xl animate-pulse mb-3">🔍</p>
-                <p className="text-sm font-semibold text-slate-700">AIが書類を読み取り中...</p>
-                <p className="text-xs text-slate-400 mt-1">会社名・金額・明細を自動抽出しています</p>
+            {/* 請求月 → 支払期限を自動表示 */}
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 space-y-2">
+              <div>
+                <label className="text-xs font-medium text-amber-700">請求月（何月分の支払いか）</label>
+                <input
+                  type="month"
+                  value={billingMonth}
+                  onChange={e => setBillingMonth(e.target.value)}
+                  className="w-full mt-1 text-sm bg-white border border-amber-200 rounded-xl px-3 py-2 outline-none"
+                />
               </div>
-            )}
+              <div className="flex items-center justify-between pt-1 border-t border-amber-200">
+                <span className="text-xs text-amber-600 font-medium">⏰ 支払期限（自動）</span>
+                <span className="text-base font-bold text-amber-800">
+                  {new Date(getPaymentDueDate(billingMonth)).toLocaleDateString('ja-JP', {
+                    year: 'numeric', month: 'long', day: 'numeric',
+                  })}
+                </span>
+              </div>
+            </div>
 
-            {/* 確認フォーム */}
-            {formReady && !ocrLoading && (
-              <>
-                {/* OCR警告 */}
-                {ocrWarning && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
-                    ⚠️ {ocrWarning}
-                  </div>
-                )}
+            {/* 書類日付・伝票番号 */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-slate-500">書類日付</label>
+                <input type="date" value={invoiceDate}
+                  onChange={e => {
+                    setInvoiceDate(e.target.value)
+                    if (e.target.value) setBillingMonth(e.target.value.slice(0, 7))
+                  }}
+                  className="w-full mt-1 text-sm bg-white border border-slate-200 rounded-xl px-2 py-2 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">伝票番号（任意）</label>
+                <input type="text" value={invoiceNumber}
+                  onChange={e => setInvoiceNumber(e.target.value)}
+                  placeholder="No.1234"
+                  className="w-full mt-1 text-sm bg-white border border-slate-200 rounded-xl px-2 py-2 outline-none"
+                />
+              </div>
+            </div>
 
-                {/* OCR成功メッセージ */}
-                {file && !ocrWarning && (
-                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-xs text-green-700 flex items-center gap-2">
-                    <span>✅</span>
-                    <span>AIが読み取りました。内容を確認・修正してから保存してください。</span>
-                  </div>
-                )}
+            {/* メモ */}
+            <div>
+              <label className="text-xs text-slate-500">メモ（任意）</label>
+              <input type="text" value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="例：5月第2回目の仕入れ"
+                className="w-full mt-1 text-sm bg-white border border-slate-200 rounded-xl px-3 py-2 outline-none"
+              />
+            </div>
 
-                {/* 種別 */}
-                <div className="flex gap-2">
-                  {(['invoice', 'delivery_note'] as InvoiceType[]).map(t => (
-                    <button key={t} type="button" onClick={() => setInvoiceType(t)}
-                      className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
-                        invoiceType === t
-                          ? 'bg-sky-500 text-white border-sky-500'
-                          : 'bg-white text-slate-600 border-slate-200'
-                      }`}>
-                      {typeLabels[t]}
-                    </button>
-                  ))}
-                </div>
-
-                {/* 会社名 */}
-                <div>
-                  <label className="text-xs font-medium text-slate-500">会社名・業者名 <span className="text-red-400">*</span></label>
-                  <input
-                    type="text"
-                    value={companyName}
-                    onChange={e => setCompanyName(e.target.value)}
-                    placeholder="例：ニジマス水産株式会社"
-                    className="w-full mt-1 text-sm bg-white border border-slate-200 rounded-xl px-3 py-2.5 outline-none"
-                  />
-                </div>
-
-                {/* 金額 */}
-                <div>
-                  <label className="text-xs font-medium text-slate-500">金額（税込） <span className="text-red-400">*</span></label>
-                  <div className="flex items-center mt-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5">
-                    <span className="text-slate-400 text-sm mr-1">¥</span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={amount}
-                      onChange={e => setAmount(e.target.value)}
-                      placeholder="例：120000"
-                      className="flex-1 text-lg font-bold text-slate-800 outline-none"
-                    />
-                  </div>
-                  {amount && parseInt(amount) > 0 && (
-                    <p className="text-sm text-sky-600 font-bold mt-1 text-right">
-                      {formatCurrency(parseInt(amount))}
-                    </p>
-                  )}
-                </div>
-
-                {/* 請求月（支払期限に直結） */}
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3">
-                  <label className="text-xs font-medium text-amber-700">請求月（締め月）</label>
-                  <input
-                    type="month"
-                    value={billingMonth}
-                    onChange={e => setBillingMonth(e.target.value)}
-                    className="w-full mt-1 text-sm bg-white border border-amber-200 rounded-xl px-3 py-2 outline-none"
-                  />
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-amber-600">支払期限（翌月末）</span>
-                    <span className="text-sm font-bold text-amber-800">
-                      {new Date(getPaymentDueDate(billingMonth)).toLocaleDateString('ja-JP', {
-                        year: 'numeric', month: 'long', day: 'numeric'
-                      })}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 書類日付・伝票番号 */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-slate-500">書類日付</label>
-                    <input type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)}
-                      className="w-full mt-1 text-sm bg-white border border-slate-200 rounded-xl px-2 py-2 outline-none" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500">伝票番号（任意）</label>
-                    <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
-                      placeholder="No.1234"
-                      className="w-full mt-1 text-sm bg-white border border-slate-200 rounded-xl px-2 py-2 outline-none" />
-                  </div>
-                </div>
-
-                {/* 読み取り明細（あれば） */}
-                {lineItems.length > 0 && (
-                  <div>
-                    <label className="text-xs text-slate-500 mb-1 block">📋 読み取り明細</label>
-                    <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-1.5">
-                      {lineItems.map((item, i) => (
-                        <div key={i} className="flex justify-between text-xs text-slate-600">
-                          <span>{item.name}　{item.quantity}{item.unit}</span>
-                          <span className="font-medium">{formatCurrency(item.amount)}</span>
-                        </div>
-                      ))}
-                      <div className="pt-1 border-t border-slate-100 flex justify-between text-xs font-bold text-slate-700">
-                        <span>合計</span>
-                        <span>{formatCurrency(lineItems.reduce((s, i) => s + i.amount, 0))}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* メモ */}
-                <div>
-                  <label className="text-xs text-slate-500">メモ（任意）</label>
-                  <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
-                    placeholder="例：5月第2回目の仕入れ"
-                    className="w-full mt-1 text-sm bg-white border border-slate-200 rounded-xl px-3 py-2 outline-none" />
-                </div>
-
-                {/* ボタン */}
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => { setShowUpload(false); resetForm() }}
-                    className="flex-1"
-                  >
-                    キャンセル
-                  </Button>
-                  <Button
-                    onClick={handleSave}
-                    disabled={saving || !companyName.trim() || !amount || parseInt(amount) <= 0}
-                    className="flex-1"
-                  >
-                    {saving ? '保存中...' : '保存する'}
-                  </Button>
-                </div>
-              </>
-            )}
+            <div className="flex gap-2">
+              <Button variant="outline"
+                onClick={() => { setShowForm(false); resetForm() }}
+                className="flex-1"
+              >
+                キャンセル
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={saving || !companyName.trim() || !amount || parseInt(amount) <= 0}
+                className="flex-1"
+              >
+                {saving ? '保存中...' : '保存する'}
+              </Button>
+            </div>
           </div>
         )}
 
@@ -462,9 +385,7 @@ export default function PaymentsPage() {
                   </p>
                 )}
               </div>
-              <div className="text-right">
-                <p className="text-xs text-slate-400">{unpaid.length}件</p>
-              </div>
+              <p className="text-xs text-slate-400">{unpaid.length}件</p>
             </div>
           </div>
         )}
@@ -475,38 +396,24 @@ export default function PaymentsPage() {
           <div className="text-center py-12">
             <p className="text-4xl mb-3">🧾</p>
             <p className="text-slate-500 font-medium">まだ書類が登録されていません</p>
-            <p className="text-xs text-slate-400 mt-1">「＋ 追加」から納品書・請求書を登録してください</p>
+            <p className="text-xs text-slate-400 mt-1">「＋ 追加」から登録してください</p>
           </div>
         ) : (
           <>
             {/* 🔴 期限超過 */}
             {overdue.length > 0 && (
-              <InvoiceSection
-                title="🔴 期限超過"
-                invoices={overdue}
-                onPaid={handleMarkPaid}
-                onUnpaid={handleMarkUnpaid}
-              />
+              <InvoiceSection title="🔴 期限超過" invoices={overdue}
+                onPaid={handleMarkPaid} onUnpaid={handleMarkUnpaid} />
             )}
-
             {/* 🟡 今月末が期限 */}
             {thisMonth.length > 0 && (
-              <InvoiceSection
-                title="🟡 今月末が期限"
-                invoices={thisMonth}
-                onPaid={handleMarkPaid}
-                onUnpaid={handleMarkUnpaid}
-              />
+              <InvoiceSection title="🟡 今月末が期限" invoices={thisMonth}
+                onPaid={handleMarkPaid} onUnpaid={handleMarkUnpaid} />
             )}
-
             {/* 📅 来月以降 */}
             {later.length > 0 && (
-              <InvoiceSection
-                title="📅 来月以降"
-                invoices={later}
-                onPaid={handleMarkPaid}
-                onUnpaid={handleMarkUnpaid}
-              />
+              <InvoiceSection title="📅 来月以降" invoices={later}
+                onPaid={handleMarkPaid} onUnpaid={handleMarkUnpaid} />
             )}
 
             {unpaid.length === 0 && (
@@ -523,13 +430,17 @@ export default function PaymentsPage() {
                   onClick={() => setShowPaid(v => !v)}
                   className="w-full flex items-center justify-between px-2 py-2 text-sm text-slate-500 font-medium"
                 >
-                  <span>✅ 支払済み（{paid.length}件・{formatCurrency(paid.reduce((s, i) => s + i.amount, 0))}）</span>
+                  <span>
+                    ✅ 支払済み（{paid.length}件・
+                    {formatCurrency(paid.reduce((s, i) => s + i.amount, 0))}）
+                  </span>
                   <span className="text-slate-400">{showPaid ? '▲' : '▼'}</span>
                 </button>
                 {showPaid && (
                   <div className="mt-2 space-y-3 opacity-60">
                     {paid.map(inv => (
-                      <InvoiceCard key={inv.id} invoice={inv} onPaid={handleMarkPaid} onUnpaid={handleMarkUnpaid} />
+                      <InvoiceCard key={inv.id} invoice={inv}
+                        onPaid={handleMarkPaid} onUnpaid={handleMarkUnpaid} />
                     ))}
                   </div>
                 )}
@@ -542,13 +453,7 @@ export default function PaymentsPage() {
   )
 }
 
-// ─── セクション ───
-function InvoiceSection({
-  title,
-  invoices,
-  onPaid,
-  onUnpaid,
-}: {
+function InvoiceSection({ title, invoices, onPaid, onUnpaid }: {
   title: string
   invoices: Invoice[]
   onPaid: (inv: Invoice) => void
@@ -566,39 +471,32 @@ function InvoiceSection({
   )
 }
 
-// ─── 請求書カード ───
-function InvoiceCard({
-  invoice: inv,
-  onPaid,
-  onUnpaid,
-}: {
+function InvoiceCard({ invoice: inv, onPaid, onUnpaid }: {
   invoice: Invoice
   onPaid: (inv: Invoice) => void
   onUnpaid: (inv: Invoice) => void
 }) {
-  const today = new Date().toLocaleDateString('sv-SE')
-  const isPaid    = !!inv.paid_at
+  const today    = new Date().toLocaleDateString('sv-SE')
+  const isPaid   = !!inv.paid_at
   const isOverdue = !isPaid && inv.payment_due_date < today
-  const dueDate   = new Date(inv.payment_due_date)
+  const dueDate  = new Date(inv.payment_due_date)
+  const overdueDays = isOverdue
+    ? Math.floor((Date.now() - dueDate.getTime()) / 86400000)
+    : 0
 
   return (
-    <Card className={
-      isPaid ? '' :
-      isOverdue ? 'border-red-200 bg-red-50' : ''
-    }>
-      {/* ヘッダー：種別 + ステータス */}
+    <Card className={isPaid ? '' : isOverdue ? 'border-red-200 bg-red-50' : ''}>
+      {/* 種別 + ステータス */}
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeBadge[inv.type]}`}>
           {typeLabels[inv.type]}
         </span>
         {isPaid && (
-          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-            ✅ 支払済み
-          </span>
+          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">✅ 支払済み</span>
         )}
         {isOverdue && (
-          <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">
-            ⚠️ 期限超過
+          <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+            ⚠️ {overdueDays}日超過
           </span>
         )}
         {inv.invoice_number && (
@@ -614,53 +512,40 @@ function InvoiceCard({
           </p>
           {inv.invoice_date && (
             <p className="text-xs text-slate-400 mt-0.5">
-              書類日付：{new Date(inv.invoice_date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })}
+              書類日付：{new Date(inv.invoice_date).toLocaleDateString('ja-JP', {
+                month: 'numeric', day: 'numeric',
+              })}
             </p>
           )}
         </div>
-        <div className="text-right">
-          <p className="text-2xl font-bold text-slate-800">{formatCurrency(inv.amount)}</p>
-        </div>
+        <p className="text-2xl font-bold text-slate-800 shrink-0">
+          {formatCurrency(inv.amount)}
+        </p>
       </div>
 
       {/* 支払期限 */}
       <div className={`rounded-xl p-3 mb-3 flex items-center justify-between ${
-        isPaid ? 'bg-green-50' :
-        isOverdue ? 'bg-red-100' : 'bg-amber-50'
+        isPaid ? 'bg-green-50' : isOverdue ? 'bg-red-100' : 'bg-amber-50'
       }`}>
         <span className="text-xs font-medium text-slate-600">支払期限</span>
         <span className={`text-sm font-bold ${
-          isPaid ? 'text-green-700' :
-          isOverdue ? 'text-red-700' : 'text-amber-700'
+          isPaid ? 'text-green-700' : isOverdue ? 'text-red-700' : 'text-amber-700'
         }`}>
-          {dueDate.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
-          {isOverdue && (
-            <span className="text-xs ml-1">
-              （{Math.floor((Date.now() - dueDate.getTime()) / 86400000)}日超過）
-            </span>
-          )}
+          {dueDate.toLocaleDateString('ja-JP', {
+            year: 'numeric', month: 'long', day: 'numeric',
+          })}
         </span>
       </div>
 
       {/* 支払日（支払済みの場合） */}
       {isPaid && inv.paid_at && (
         <div className="flex justify-between text-sm mb-3">
-          <span className="text-slate-400">支払日</span>
-          <span className="text-green-600 font-medium">
-            {new Date(inv.paid_at).toLocaleDateString('ja-JP', { month: 'long', day: 'numeric' })}
+          <span className="text-slate-400 text-xs">支払日</span>
+          <span className="text-green-600 text-xs font-medium">
+            {new Date(inv.paid_at).toLocaleDateString('ja-JP', {
+              month: 'long', day: 'numeric',
+            })}
           </span>
-        </div>
-      )}
-
-      {/* 明細 */}
-      {inv.line_items && inv.line_items.length > 0 && (
-        <div className="bg-slate-50 rounded-xl p-2.5 mb-3">
-          {inv.line_items.map((item, i) => (
-            <div key={i} className="flex justify-between text-xs text-slate-500 py-0.5">
-              <span>{item.name}　{item.quantity}{item.unit}</span>
-              <span>{formatCurrency(item.amount)}</span>
-            </div>
-          ))}
         </div>
       )}
 
@@ -668,7 +553,7 @@ function InvoiceCard({
         <p className="text-xs text-slate-400 mb-3">📝 {inv.notes}</p>
       )}
 
-      {/* 添付ファイル */}
+      {/* 書類写真 */}
       {inv.file_url && (
         <a
           href={inv.file_url}
@@ -676,7 +561,7 @@ function InvoiceCard({
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 text-xs text-sky-600 underline mb-3 font-medium"
         >
-          📎 {inv.file_name ?? '書類を見る'}
+          📎 書類写真を確認する
         </a>
       )}
 
@@ -688,7 +573,7 @@ function InvoiceCard({
       ) : (
         <button
           onClick={() => onUnpaid(inv)}
-          className="w-full text-xs text-slate-400 py-1 hover:text-slate-600 transition-colors"
+          className="w-full text-xs text-slate-400 py-1"
         >
           未払いに戻す
         </button>
