@@ -115,7 +115,7 @@ export default function ManualPage() {
           <div className="text-center py-12">
             <p className="text-slate-400 text-sm mb-2">マニュアルがまだありません</p>
             {isAdmin && (
-              <Link href="/admin/manual/new" className="text-sky-500 text-sm font-medium">
+              <Link href="/admin/manual" className="text-sky-500 text-sm font-medium">
                 ＋ 最初のマニュアルを作成
               </Link>
             )}

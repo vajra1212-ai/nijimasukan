@@ -49,6 +49,16 @@ export default function HandoverPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  const handleConfirm = async (id: string) => {
+    const supabase = createClient()
+    const auth = getAuth()
+    await supabase.from('handover_memos').update({
+      confirmed_by: auth?.staffId ?? null,
+      confirmed_at: new Date().toISOString(),
+    }).eq('id', id)
+    fetchData()
+  }
+
   const handleSave = async () => {
     if (!content.trim()) return
     setSaving(true)
@@ -117,8 +127,19 @@ export default function HandoverPage() {
                       {h.urgency !== 'normal' && <span className="ml-1">{urgencyLabels[h.urgency]}</span>}
                     </p>
                     <p className="text-sm text-slate-800 whitespace-pre-wrap">{h.content}</p>
+                    {h.confirmed_at && (
+                      <p className="text-xs text-green-600 mt-2">
+                        ✓ 確認済み（{new Date(h.confirmed_at).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}）
+                      </p>
+                    )}
                   </div>
-                  {h.confirmed_at && <span className="text-xs text-green-600 shrink-0">確認済み ✓</span>}
+                  {!h.confirmed_at && (
+                    <button
+                      onClick={() => handleConfirm(h.id)}
+                      className="text-xs bg-slate-700 text-white px-2.5 py-1.5 rounded-lg shrink-0 active:bg-slate-800">
+                      確認済み ✓
+                    </button>
+                  )}
                 </div>
               </Card>
             ))}

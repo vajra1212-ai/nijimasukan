@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { getAuth } from '@/lib/auth'
 import { calcDailySummary, calcStockForecast, formatCurrency } from '@/lib/calculations'
 import { Session, DailyRecord, Settings, SupplierContact, HandoverMemo, WorkShift } from '@/types'
 import { SyncStatus } from '@/components/ui/SyncStatus'
@@ -39,6 +40,10 @@ export default function DashboardPage() {
   const [recentConsumptions, setRecentConsumptions] = useState<number[]>([])
   const [workShifts, setWorkShifts] = useState<WorkShift[]>([])
   const [loading, setLoading] = useState(true)
+  const [equipmentCheckedToday, setEquipmentCheckedToday] = useState(false)
+  const [todayHandoverDone, setTodayHandoverDone] = useState(false)
+  const [confirmingHandover, setConfirmingHandover] = useState(false)
+  const [confirmingDelivery, setConfirmingDelivery] = useState(false)
 
   const fetchData = useCallback(async () => {
     const supabase = createClient()
@@ -54,6 +59,8 @@ export default function DashboardPage() {
       { data: equipmentData },
       { data: recentData },
       { data: shiftsData },
+      { data: equipCheckData },
+      { data: todayHandoverData },
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
@@ -66,9 +73,11 @@ export default function DashboardPage() {
         .select('*').eq('delivery_confirmed', false).eq('has_order', true)
         .lte('expected_delivery_date', date).order('expected_delivery_date').limit(1).single(),
       supabase.from('handover_memos').select('*, staff(name)').eq('date', yesterdayStr()).single(),
-      supabase.from('equipment_checks').select('*').eq('date', date).eq('status', 'order_required'),
+      supabase.from('equipment_checks').select('id').eq('date', date).eq('status', 'order_required'),
       supabase.from('daily_summary').select('total_consumption').order('date', { ascending: false }).limit(3),
       supabase.from('work_shifts').select('*, part_timers(name, hourly_wage)').eq('date', date),
+      supabase.from('equipment_checks').select('id').eq('date', date).limit(1),
+      supabase.from('handover_memos').select('id').eq('date', date).single(),
     ])
 
     setSessions((sessionsData as Session[]) ?? [])
@@ -82,6 +91,8 @@ export default function DashboardPage() {
       ((recentData ?? []) as { total_consumption: number }[]).map(r => r.total_consumption)
     )
     setWorkShifts((shiftsData as WorkShift[]) ?? [])
+    setEquipmentCheckedToday((equipCheckData ?? []).length > 0)
+    setTodayHandoverDone(!!todayHandoverData)
     setLoading(false)
   }, [])
 
@@ -146,6 +157,33 @@ export default function DashboardPage() {
     urgent:  'border-red-400 bg-red-50',
   }
 
+  // 引き継ぎメモを確認済みにする
+  const handleConfirmHandover = async () => {
+    if (!handover) return
+    setConfirmingHandover(true)
+    const supabase = createClient()
+    const auth = getAuth()
+    await supabase.from('handover_memos').update({
+      confirmed_by: auth?.staffId ?? null,
+      confirmed_at: new Date().toISOString(),
+    }).eq('id', handover.id)
+    setConfirmingHandover(false)
+    fetchData()
+  }
+
+  // 入荷確認
+  const handleConfirmDelivery = async () => {
+    if (!pendingDelivery) return
+    setConfirmingDelivery(true)
+    const supabase = createClient()
+    await supabase.from('supplier_contacts').update({
+      delivery_confirmed: true,
+      delivery_confirmed_at: new Date().toISOString(),
+    }).eq('id', pendingDelivery.id)
+    setConfirmingDelivery(false)
+    fetchData()
+  }
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <p className="text-slate-400">読み込み中...</p>
@@ -173,10 +211,12 @@ export default function DashboardPage() {
                 <p className="font-bold">🚚 本日入荷予定：{pendingDelivery.order_count}匹</p>
                 <p className="text-sm mt-1">{pendingDelivery.memo ?? ''}</p>
               </div>
-              <Link href={`/supplier/confirm/${pendingDelivery.id}`}
-                className="text-sm bg-sky-500 text-white px-3 py-1.5 rounded-lg font-medium shrink-0">
-                入荷確認
-              </Link>
+              <button
+                onClick={handleConfirmDelivery}
+                disabled={confirmingDelivery}
+                className="text-sm bg-sky-500 text-white px-3 py-1.5 rounded-lg font-medium shrink-0 disabled:opacity-60">
+                {confirmingDelivery ? '確認中...' : '入荷確認 ✓'}
+              </button>
             </div>
           </AlertCard>
         )}
@@ -191,13 +231,44 @@ export default function DashboardPage() {
                 </p>
                 <p className="text-sm mt-1 text-slate-800 whitespace-pre-wrap">{handover.content}</p>
               </div>
-              <Link href={`/records/handover/confirm/${handover.id}`}
-                className="text-xs bg-slate-700 text-white px-2 py-1 rounded-lg shrink-0">
-                確認済み
-              </Link>
+              <button
+                onClick={handleConfirmHandover}
+                disabled={confirmingHandover}
+                className="text-xs bg-slate-700 text-white px-2 py-1.5 rounded-lg shrink-0 disabled:opacity-60">
+                {confirmingHandover ? '...' : '確認済み ✓'}
+              </button>
             </div>
           </div>
         )}
+
+        {/* ─── 今日のタスク ─── */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <h2 className="text-sm font-semibold text-slate-500 mb-3">🗒️ 今日やること</h2>
+          <div className="space-y-2">
+            {[
+              { label: '開催回の入力', done: sessions.length > 0, href: '/sessions/new', doneLabel: `${sessions.length}回分入力済み` },
+              { label: '備品チェック', done: equipmentCheckedToday, href: '/equipment', doneLabel: '確認済み' },
+              { label: '日次締め（残数・仕入れ）', done: isClosed, href: '/daily', doneLabel: '締め済み' },
+              { label: '引き継ぎメモを書く', done: todayHandoverDone, href: '/records/handover', doneLabel: '記録済み' },
+            ].map(task => (
+              <Link key={task.label} href={task.href}
+                className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
+                  task.done ? 'bg-green-50' : 'bg-slate-50 active:bg-slate-100'
+                }`}>
+                <span className={`text-lg ${task.done ? 'opacity-100' : 'opacity-30'}`}>
+                  {task.done ? '✅' : '⬜'}
+                </span>
+                <span className={`text-sm flex-1 ${task.done ? 'text-green-700 line-through' : 'text-slate-700 font-medium'}`}>
+                  {task.label}
+                </span>
+                {task.done
+                  ? <span className="text-xs text-green-600">{task.doneLabel}</span>
+                  : <span className="text-slate-300 text-sm">›</span>
+                }
+              </Link>
+            ))}
+          </div>
+        </div>
 
         {/* 池の残数（最重要情報） */}
         <Card className={isLowStock ? 'border-red-300 bg-red-50' : 'border-sky-200 bg-sky-50'}>

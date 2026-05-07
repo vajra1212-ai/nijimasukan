@@ -160,6 +160,7 @@ export interface TroubleRecord {
   resolution: string | null
   status: TroubleStatus
   admin_note: string | null
+  linked_manual_id: string | null
   created_by: string | null
   updated_by: string | null
   created_at: string
