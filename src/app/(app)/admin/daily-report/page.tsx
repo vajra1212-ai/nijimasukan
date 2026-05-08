@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/calculations'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { Card } from '@/components/ui/Card'
 import { HandoverMemo, HandoverUrgency, TroubleRecord, TroubleCategory } from '@/types'
+import { getAuth } from '@/lib/auth'
 
 interface DayReport {
   date: string
@@ -26,21 +26,21 @@ type TroubleRow = Omit<TroubleRecord, 'staff'> & {
   staff?: { name: string } | null
 }
 
-const CHECKLIST_PREFIX = 'CHECKS:'
 const CHECKLIST_LABELS: Record<string, string> = {
-  complaint:    '🔴 クレームあり',
-  low_stock:    '⚠️ 在庫少ない',
-  equipment:    '📦 備品切れ',
-  malfunction:  '🔧 設備不具合',
-  weather:      '🌧 天候悪化懸念',
-  special:      '⭐ 特別対応',
+  gdrive_upload: '📸 GDriveアップ済み',
+  complaint:     '🔴 クレームあり',
+  low_stock:     '⚠️ 在庫少ない',
+  equipment:     '📦 備品切れ',
+  malfunction:   '🔧 設備不具合',
+  weather:       '🌧 天候悪化懸念',
+  special:       '⭐ 特別対応',
 }
 
 function decodeHandover(raw: string): { checks: string[]; text: string } {
-  if (raw.startsWith(CHECKLIST_PREFIX)) {
+  if (raw.startsWith('CHECKS:')) {
     const nl = raw.indexOf('\n')
     return {
-      checks: (nl >= 0 ? raw.slice(CHECKLIST_PREFIX.length, nl) : raw.slice(CHECKLIST_PREFIX.length)).split(',').filter(Boolean),
+      checks: (nl >= 0 ? raw.slice(7, nl) : raw.slice(7)).split(',').filter(Boolean),
       text: nl >= 0 ? raw.slice(nl + 1) : '',
     }
   }
@@ -83,6 +83,7 @@ export default function DailyReportPage() {
   const [troubles, setTroubles] = useState<TroubleRow[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -146,6 +147,18 @@ export default function DailyReportPage() {
   }, [month])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  const handleConfirmHandover = async (id: string) => {
+    setConfirmingId(id)
+    const supabase = createClient()
+    const auth = getAuth()
+    await supabase.from('handover_memos').update({
+      confirmed_by: auth?.staffId ?? null,
+      confirmed_at: new Date().toISOString(),
+    }).eq('id', id)
+    setConfirmingId(null)
+    fetchData()
+  }
 
   const getHandover = (date: string) => handovers.find(h => h.date === date)
   const getTroubles = (date: string) => troubles.filter(t => t.occurred_at.startsWith(date))
@@ -244,29 +257,42 @@ export default function DailyReportPage() {
                       {/* 引き継ぎメモ */}
                       {handover && (
                         <div className={`rounded-xl border p-3 ${urgencyStyles[handover.urgency]}`}>
-                          <p className="text-xs font-semibold text-slate-600 mb-2">
-                            📋 引き継ぎ
-                            {handover.urgency !== 'normal' && (
-                              <span className={`ml-2 ${handover.urgency === 'urgent' ? 'text-red-600' : 'text-amber-600'}`}>
-                                {handover.urgency === 'urgent' ? '🚨 緊急' : '⚠️ 要注意'}
-                              </span>
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <p className="text-xs font-semibold text-slate-600">
+                              📋 引き継ぎ
+                              {handover.urgency !== 'normal' && (
+                                <span className={`ml-2 ${handover.urgency === 'urgent' ? 'text-red-600' : 'text-amber-600'}`}>
+                                  {handover.urgency === 'urgent' ? '🚨 緊急' : '⚠️ 要注意'}
+                                </span>
+                              )}
+                            </p>
+                            {!handover.confirmed_at && (
+                              <button
+                                onClick={() => handleConfirmHandover(handover.id)}
+                                disabled={confirmingId === handover.id}
+                                className="text-xs bg-slate-700 text-white px-2 py-1 rounded-lg shrink-0 disabled:opacity-60"
+                              >
+                                {confirmingId === handover.id ? '...' : '確認済み ✓'}
+                              </button>
                             )}
-                          </p>
+                          </div>
                           {checkLabels.length > 0 && (
                             <div className="flex flex-wrap gap-1 mb-2">
                               {checkLabels.map(label => (
-                                <span key={label} className="text-xs bg-slate-700 text-white px-1.5 py-0.5 rounded-md">{label}</span>
+                                <span key={label} className={`text-xs px-1.5 py-0.5 rounded-md ${
+                                  label.includes('GDrive') ? 'bg-green-100 text-green-700' : 'bg-slate-700 text-white'
+                                }`}>{label}</span>
                               ))}
                             </div>
                           )}
                           {decoded?.text && <p className="text-sm text-slate-800 whitespace-pre-wrap">{decoded.text}</p>}
-                          <div className="flex items-center justify-between mt-2">
+                          <div className="mt-2">
                             {handover.confirmed_at ? (
                               <span className="text-xs text-green-600">
                                 ✓ {new Date(handover.confirmed_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 確認済み
                               </span>
                             ) : (
-                              <span className="text-xs text-slate-400">未確認</span>
+                              <span className="text-xs text-amber-600 font-medium">⏳ 未確認</span>
                             )}
                           </div>
                         </div>

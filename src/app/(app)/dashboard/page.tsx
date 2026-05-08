@@ -14,6 +14,27 @@ function yesterdayStr() {
   const d = new Date(); d.setDate(d.getDate() - 1); return d.toLocaleDateString('sv-SE')
 }
 
+// 引き継ぎメモのデコード
+const HANDOVER_CHECK_LABELS: Record<string, string> = {
+  gdrive_upload: '📸 写真・動画GDrive保存済み',
+  complaint:     '🔴 クレームあり',
+  low_stock:     '⚠️ 在庫少ない',
+  equipment:     '📦 備品切れ・要発注',
+  malfunction:   '🔧 設備不具合',
+  weather:       '🌧 天候悪化の懸念',
+  special:       '⭐ 特別対応あり',
+}
+function decodeHandoverContent(raw: string): { checks: string[]; text: string } {
+  if (raw.startsWith('CHECKS:')) {
+    const nl = raw.indexOf('\n')
+    return {
+      checks: (nl >= 0 ? raw.slice(7, nl) : raw.slice(7)).split(',').filter(Boolean),
+      text: nl >= 0 ? raw.slice(nl + 1) : '',
+    }
+  }
+  return { checks: [], text: raw }
+}
+
 function loadSettings(raw: { key: string; value: string }[]): Settings {
   const map = Object.fromEntries(raw.map(r => [r.key, r.value]))
   return {
@@ -249,24 +270,41 @@ export default function DashboardPage() {
         )}
 
         {/* 引き継ぎメモ */}
-        {handover && !handover.confirmed_at && (
-          <div className={`rounded-2xl border-2 p-4 ${urgencyStyle[handover.urgency]}`}>
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
+        {handover && !handover.confirmed_at && (() => {
+          const decoded = decodeHandoverContent(handover.content)
+          const checkLabels = decoded.checks
+            .filter(c => c !== 'gdrive_upload') // GDrive確認は引き継ぎ表示から除外（情報過多防止）
+            .map(id => HANDOVER_CHECK_LABELS[id]).filter(Boolean)
+          const gdriveUploaded = decoded.checks.includes('gdrive_upload')
+          return (
+            <div className={`rounded-2xl border-2 p-4 ${urgencyStyle[handover.urgency]}`}>
+              <div className="flex items-start justify-between gap-2 mb-2">
                 <p className="font-bold text-sm text-slate-700">
-                  {handover.urgency === 'urgent' ? '🚨' : handover.urgency === 'caution' ? '⚠️' : '📋'} 前日の引き継ぎ
+                  {handover.urgency === 'urgent' ? '🚨' : handover.urgency === 'caution' ? '⚠️' : '📋'} 前日（{new Date(handover.date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })}）の引き継ぎ
                 </p>
-                <p className="text-sm mt-1 text-slate-800 whitespace-pre-wrap">{handover.content}</p>
+                <button
+                  onClick={handleConfirmHandover}
+                  disabled={confirmingHandover}
+                  className="text-xs bg-slate-700 text-white px-2 py-1.5 rounded-lg shrink-0 disabled:opacity-60">
+                  {confirmingHandover ? '...' : '確認済み ✓'}
+                </button>
               </div>
-              <button
-                onClick={handleConfirmHandover}
-                disabled={confirmingHandover}
-                className="text-xs bg-slate-700 text-white px-2 py-1.5 rounded-lg shrink-0 disabled:opacity-60">
-                {confirmingHandover ? '...' : '確認済み ✓'}
-              </button>
+              {gdriveUploaded && (
+                <span className="inline-flex text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full mb-2">📸 GDriveアップ済み</span>
+              )}
+              {checkLabels.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {checkLabels.map(label => (
+                    <span key={label} className="text-xs bg-slate-700 text-white px-1.5 py-0.5 rounded-md">{label}</span>
+                  ))}
+                </div>
+              )}
+              {decoded.text && (
+                <p className="text-sm text-slate-800 whitespace-pre-wrap">{decoded.text}</p>
+              )}
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* ─── 今日の予約 ─── */}
         {todayReservations.length > 0 && (
@@ -305,8 +343,8 @@ export default function DashboardPage() {
               { label: '予約カレンダーを確認', done: true, href: '/calendar', doneLabel: todayReservations.length > 0 ? `本日${todayReservations.length}件の予約あり` : '予約なし', alwaysShow: true, highlight: todayReservations.length > 0 },
               { label: '開催回の入力', done: sessions.length > 0, href: '/sessions/new', doneLabel: `${sessions.length}回分入力済み` },
               { label: '備品チェック', done: equipmentCheckedToday, href: '/equipment', doneLabel: '確認済み' },
-              { label: '日次締め（残数・仕入れ）', done: isClosed, href: '/daily', doneLabel: '締め済み' },
-              { label: '引き継ぎメモを書く', done: todayHandoverDone, href: '/records/handover', doneLabel: '記録済み' },
+              { label: '日次締め（残数・仕入れ・引き継ぎ）', done: isClosed, href: '/daily', doneLabel: '締め済み' },
+              { label: '📸 写真・動画をGDriveにアップロード', done: todayHandoverDone, href: '/daily', doneLabel: '締めで確認済み' },
             ].map(task => (
               <Link key={task.label} href={task.href}
                 className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${

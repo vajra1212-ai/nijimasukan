@@ -41,13 +41,13 @@ export default function RecordsPage() {
           </Link>
         )}
 
-        <Link href="/records/handover">
+        <Link href="/daily">
           <Card className="active:bg-slate-50 cursor-pointer">
             <div className="flex items-center gap-3">
               <span className="text-3xl">📋</span>
               <div>
-                <p className="font-bold text-slate-800">引き継ぎメモ</p>
-                <p className="text-sm text-slate-500">翌日への申し送り事項を書く</p>
+                <p className="font-bold text-slate-800">引き継ぎ・日次締め</p>
+                <p className="text-sm text-slate-500">日報・申し送り・GDriveチェック</p>
               </div>
               <span className="ml-auto text-slate-300">›</span>
             </div>

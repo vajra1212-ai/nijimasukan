@@ -16,12 +16,13 @@ function todayStr() { return new Date().toLocaleDateString('sv-SE') }
 
 // ---- 引き継ぎ関連 ----
 const CHECKLIST_ITEMS = [
-  { id: 'complaint',    label: '🔴 クレームあり' },
-  { id: 'low_stock',   label: '⚠️ 在庫少ない' },
-  { id: 'equipment',   label: '📦 備品切れ・要発注' },
-  { id: 'malfunction', label: '🔧 設備不具合' },
-  { id: 'weather',     label: '🌧 天候悪化の懸念' },
-  { id: 'special',     label: '⭐ 特別対応あり' },
+  { id: 'gdrive_upload', label: '📸 写真・動画をGDriveに保存済み' },
+  { id: 'complaint',     label: '🔴 クレームあり' },
+  { id: 'low_stock',    label: '⚠️ 在庫少ない' },
+  { id: 'equipment',    label: '📦 備品切れ・要発注' },
+  { id: 'malfunction',  label: '🔧 設備不具合' },
+  { id: 'weather',      label: '🌧 天候悪化の懸念' },
+  { id: 'special',      label: '⭐ 特別対応あり' },
 ]
 const CHECKLIST_PREFIX = 'CHECKS:'
 
