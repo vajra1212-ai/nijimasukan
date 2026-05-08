@@ -6,13 +6,52 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getAuth } from '@/lib/auth'
 import { calcDailySummary, formatCurrency } from '@/lib/calculations'
-import { Session, DailyRecord, Settings, Weather, PartTimer } from '@/types'
+import { Session, DailyRecord, Settings, Weather, PartTimer, HandoverMemo, HandoverUrgency, TroubleRecord, TroubleCategory } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { NumberInput } from '@/components/ui/NumberInput'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 
 function todayStr() { return new Date().toLocaleDateString('sv-SE') }
+
+// ---- 引き継ぎ関連 ----
+const CHECKLIST_ITEMS = [
+  { id: 'complaint',    label: '🔴 クレームあり' },
+  { id: 'low_stock',   label: '⚠️ 在庫少ない' },
+  { id: 'equipment',   label: '📦 備品切れ・要発注' },
+  { id: 'malfunction', label: '🔧 設備不具合' },
+  { id: 'weather',     label: '🌧 天候悪化の懸念' },
+  { id: 'special',     label: '⭐ 特別対応あり' },
+]
+const CHECKLIST_PREFIX = 'CHECKS:'
+
+function encodeHandover(checks: string[], text: string): string {
+  if (checks.length === 0) return text
+  return `${CHECKLIST_PREFIX}${checks.join(',')}\n${text}`
+}
+function decodeHandover(raw: string): { checks: string[]; text: string } {
+  if (raw.startsWith(CHECKLIST_PREFIX)) {
+    const nl = raw.indexOf('\n')
+    return {
+      checks: (nl >= 0 ? raw.slice(CHECKLIST_PREFIX.length, nl) : raw.slice(CHECKLIST_PREFIX.length)).split(',').filter(Boolean),
+      text: nl >= 0 ? raw.slice(nl + 1) : '',
+    }
+  }
+  return { checks: [], text: raw }
+}
+
+const categoryLabels: Record<TroubleCategory, string> = {
+  complaint:   'クレーム',
+  trouble:     'トラブル',
+  incident:    'インシデント',
+  improvement: '気づき・改善',
+}
+const categoryColors: Record<TroubleCategory, string> = {
+  complaint:   'bg-red-100 text-red-700',
+  trouble:     'bg-amber-100 text-amber-700',
+  incident:    'bg-orange-100 text-orange-700',
+  improvement: 'bg-sky-100 text-sky-700',
+}
 function prevDay(dateStr: string): string {
   const d = new Date(dateStr)
   d.setDate(d.getDate() - 1)
@@ -80,6 +119,20 @@ function DailyForm() {
   const [partTimers, setPartTimers] = useState<PartTimer[]>([])
   const [shifts, setShifts] = useState<ShiftEntry[]>([])
 
+  // 引き継ぎ
+  const [handoverChecks, setHandoverChecks] = useState<string[]>([])
+  const [handoverText, setHandoverText] = useState('')
+  const [handoverUrgency, setHandoverUrgency] = useState<HandoverUrgency>('normal')
+  const [existingHandover, setExistingHandover] = useState<HandoverMemo | null>(null)
+
+  // クレーム・インシデント
+  const [showTroubleForm, setShowTroubleForm] = useState(false)
+  const [troubleCategory, setTroubleCategory] = useState<TroubleCategory>('complaint')
+  const [troubleTitle, setTroubleTitle] = useState('')
+  const [troubleSituation, setTroubleSituation] = useState('')
+  const [troubleResolution, setTroubleResolution] = useState('')
+  const [existingTroubles, setExistingTroubles] = useState<TroubleRecord[]>([])
+
   const fetchData = useCallback(async () => {
     const supabase = createClient()
     const auth = getAuth()
@@ -93,6 +146,8 @@ function DailyForm() {
       { data: ptData },
       { data: shiftsData },
       { data: charcoalData },
+      { data: handoverData },
+      { data: troubleData },
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
@@ -105,6 +160,11 @@ function DailyForm() {
       supabase.from('part_timers').select('*').eq('is_active', true).order('created_at'),
       supabase.from('work_shifts').select('*').eq('date', date),
       supabase.from('expenses').select('*').eq('date', date).eq('category', 'charcoal').maybeSingle(),
+      supabase.from('handover_memos').select('*').eq('date', date).single(),
+      supabase.from('trouble_records').select('*')
+        .gte('occurred_at', `${date}T00:00:00`)
+        .lte('occurred_at', `${date}T23:59:59`)
+        .order('created_at'),
     ])
 
     setSessions((sessionsData as Session[]) ?? [])
@@ -161,6 +221,28 @@ function DailyForm() {
         shiftId: existing?.id,
       }
     }))
+
+    // 引き継ぎ
+    if (handoverData) {
+      const h = handoverData as HandoverMemo
+      setExistingHandover(h)
+      const decoded = decodeHandover(h.content)
+      setHandoverChecks(decoded.checks)
+      setHandoverText(decoded.text)
+      setHandoverUrgency(h.urgency)
+    } else {
+      setExistingHandover(null)
+      setHandoverChecks([])
+      setHandoverText('')
+      setHandoverUrgency('normal')
+    }
+
+    // トラブル記録
+    setExistingTroubles((troubleData as TroubleRecord[]) ?? [])
+    setShowTroubleForm(false)
+    setTroubleTitle('')
+    setTroubleSituation('')
+    setTroubleResolution('')
   }, [date])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -274,6 +356,34 @@ function DailyForm() {
       }
     }
 
+    // 引き継ぎメモを保存
+    const handoverContent = encodeHandover(handoverChecks, handoverText)
+    if (handoverChecks.length > 0 || handoverText.trim()) {
+      const autoUrgency: HandoverUrgency =
+        handoverChecks.includes('complaint') || handoverChecks.includes('malfunction') ? 'urgent' :
+        handoverChecks.includes('low_stock') || handoverChecks.includes('equipment') ? 'caution' :
+        handoverUrgency
+      const handoverPayload = { date, urgency: autoUrgency, content: handoverContent, created_by: auth?.staffId ?? null }
+      if (existingHandover) {
+        await supabase.from('handover_memos').update(handoverPayload).eq('id', existingHandover.id)
+      } else {
+        await supabase.from('handover_memos').insert(handoverPayload)
+      }
+    }
+
+    // クレーム・インシデントを保存
+    if (showTroubleForm && troubleTitle.trim() && troubleSituation.trim()) {
+      await supabase.from('trouble_records').insert({
+        occurred_at: new Date(`${date}T12:00:00`).toISOString(),
+        category: troubleCategory,
+        title: troubleTitle,
+        situation: troubleSituation,
+        resolution: troubleResolution.trim() || null,
+        status: 'in_progress',
+        created_by: auth?.staffId ?? null,
+      })
+    }
+
     setSaving(false)
     setSaved(true)
     if (close) router.push('/')
@@ -311,6 +421,15 @@ function DailyForm() {
               setCharcoalQty(0)
               setCharcoalUnitPrice('')
               setCharcoalExpenseId(null)
+              setHandoverChecks([])
+              setHandoverText('')
+              setHandoverUrgency('normal')
+              setExistingHandover(null)
+              setExistingTroubles([])
+              setShowTroubleForm(false)
+              setTroubleTitle('')
+              setTroubleSituation('')
+              setTroubleResolution('')
             }}
             className="w-full text-base font-semibold text-slate-800 bg-transparent outline-none"
           />
@@ -613,6 +732,122 @@ function DailyForm() {
           <label className="block text-sm text-slate-500 mb-1">備考</label>
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
             className="w-full text-sm bg-transparent outline-none resize-none" />
+        </div>
+
+        {/* ===== 引き継ぎ・申し送り ===== */}
+        {(() => {
+          const hasImportant = handoverChecks.some(c => ['complaint', 'malfunction'].includes(c))
+          const hasCaution = handoverChecks.some(c => ['low_stock', 'equipment'].includes(c))
+          const autoUrgency: HandoverUrgency = hasImportant ? 'urgent' : hasCaution ? 'caution' : handoverUrgency
+          const borderColor = autoUrgency === 'urgent' ? 'border-red-400 bg-red-50' : autoUrgency === 'caution' ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-white'
+          return (
+            <div className={`rounded-2xl border-2 p-4 space-y-3 ${borderColor}`}>
+              <h3 className="text-sm font-semibold text-slate-700">📋 引き継ぎ・申し送り</h3>
+              <div className="grid grid-cols-2 gap-1.5">
+                {CHECKLIST_ITEMS.map(item => (
+                  <button key={item.id} type="button"
+                    onClick={() => setHandoverChecks(prev => prev.includes(item.id) ? prev.filter(c => c !== item.id) : [...prev, item.id])}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium text-left transition-colors ${
+                      handoverChecks.includes(item.id) ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${handoverChecks.includes(item.id) ? 'bg-white border-white' : 'border-slate-300'}`}>
+                      {handoverChecks.includes(item.id) && <span className="text-slate-700 text-xs font-bold">✓</span>}
+                    </span>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {!hasImportant && !hasCaution && (
+                <div className="flex gap-2">
+                  {(['normal', 'caution', 'urgent'] as HandoverUrgency[]).map(u => (
+                    <button key={u} type="button" onClick={() => setHandoverUrgency(u)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                        handoverUrgency === u
+                          ? u === 'urgent' ? 'bg-red-50 border-red-400 text-red-700 font-bold'
+                          : u === 'caution' ? 'bg-amber-50 border-amber-300 text-amber-700 font-bold'
+                          : 'bg-white border-slate-300 text-slate-700 font-bold'
+                          : 'bg-white border-slate-200 text-slate-400'
+                      }`}>
+                      {u === 'normal' ? '通常' : u === 'caution' ? '⚠️ 要注意' : '🚨 緊急'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {(hasImportant || hasCaution) && (
+                <p className={`text-xs px-2 py-1 rounded-lg ${hasImportant ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                  {hasImportant ? '🚨 緊急度が自動的に「緊急」に設定されました' : '⚠️ 緊急度が自動的に「要注意」に設定されました'}
+                </p>
+              )}
+              <textarea value={handoverText} onChange={e => setHandoverText(e.target.value)}
+                placeholder="次の担当者への具体的な申し送り事項（任意）" rows={3}
+                className="w-full text-sm bg-white/80 border border-slate-200 rounded-xl px-3 py-2 outline-none resize-none"
+              />
+            </div>
+          )
+        })()}
+
+        {/* ===== クレーム・インシデント ===== */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-700">⚠️ クレーム・インシデント</h3>
+            <button type="button"
+              onClick={() => setShowTroubleForm(v => !v)}
+              className={`text-xs px-3 py-1 rounded-lg font-medium border transition-colors ${
+                showTroubleForm ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200'
+              }`}
+            >
+              {showTroubleForm ? '✕ キャンセル' : '＋ 記録する'}
+            </button>
+          </div>
+
+          {/* 既存のトラブル記録（当日分） */}
+          {existingTroubles.length > 0 && (
+            <div className="space-y-2">
+              {existingTroubles.map(t => (
+                <div key={t.id} className="flex items-start gap-2 px-3 py-2 bg-slate-50 rounded-xl">
+                  <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${categoryColors[t.category]}`}>
+                    {categoryLabels[t.category]}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800">{t.title}</p>
+                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{t.situation}</p>
+                    {t.resolution && <p className="text-xs text-green-600 mt-0.5">対処：{t.resolution}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {existingTroubles.length === 0 && !showTroubleForm && (
+            <p className="text-xs text-slate-400">本日のクレーム・インシデント記録はありません</p>
+          )}
+
+          {/* 新規入力フォーム */}
+          {showTroubleForm && (
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <div className="flex gap-1.5 flex-wrap">
+                {(['complaint', 'trouble', 'incident', 'improvement'] as TroubleCategory[]).map(c => (
+                  <button key={c} type="button" onClick={() => setTroubleCategory(c)}
+                    className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${
+                      troubleCategory === c ? categoryColors[c] + ' border-current' : 'bg-white text-slate-500 border-slate-200'
+                    }`}>
+                    {categoryLabels[c]}
+                  </button>
+                ))}
+              </div>
+              <input type="text" value={troubleTitle} onChange={e => setTroubleTitle(e.target.value)}
+                placeholder="件名（例：お客様からの苦情 / 設備不具合）"
+                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 outline-none" />
+              <textarea value={troubleSituation} onChange={e => setTroubleSituation(e.target.value)}
+                placeholder="状況の詳細" rows={2}
+                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 outline-none resize-none" />
+              <textarea value={troubleResolution} onChange={e => setTroubleResolution(e.target.value)}
+                placeholder="対処内容（任意）" rows={2}
+                className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 outline-none resize-none" />
+              <p className="text-xs text-slate-400">※ 日次締め保存時に一緒に記録されます</p>
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-4">
