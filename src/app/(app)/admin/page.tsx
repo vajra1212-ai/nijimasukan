@@ -112,6 +112,7 @@ export default function AdminPage() {
             { href: '/shifts',           icon: '👷', label: 'シフト管理',    sub: '月次給与・時間集計' },
             { href: '/admin/history',    icon: '📅', label: '前年データ',    sub: '月次実績を手入力' },
             { href: '/admin/daily-report', icon: '📝', label: '日報一覧',      sub: '引き継ぎ・クレーム確認' },
+            { href: '/records/trouble',  icon: '⚠️', label: 'クレーム管理',   sub: '一覧・対応状況確認' },
             { href: '/admin/report',     icon: '🔍', label: 'データ検索',    sub: '絞り込み・出力' },
             { href: '/admin/import',     icon: '📂', label: 'データ取込',    sub: 'CSV・Excelから' },
           ].map(item => (

@@ -63,6 +63,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [equipmentCheckedToday, setEquipmentCheckedToday] = useState(false)
   const [todayHandoverDone, setTodayHandoverDone] = useState(false)
+  const [gdriveUploaded, setGdriveUploaded] = useState(false)
   const [confirmingHandover, setConfirmingHandover] = useState(false)
   const [confirmingDelivery, setConfirmingDelivery] = useState(false)
   const [monthlyCharcoalCost, setMonthlyCharcoalCost] = useState(0)
@@ -104,7 +105,7 @@ export default function DashboardPage() {
       supabase.from('daily_summary').select('total_consumption').order('date', { ascending: false }).limit(3),
       supabase.from('work_shifts').select('*, part_timers(name, hourly_wage)').eq('date', date),
       supabase.from('equipment_checks').select('id').eq('date', date).limit(1),
-      supabase.from('handover_memos').select('id').eq('date', date).single(),
+      supabase.from('handover_memos').select('id, content').eq('date', date).single(),
       supabase.from('expenses').select('amount').eq('year_month', date.slice(0, 7)).eq('category', 'charcoal'),
       // 過去4週間の曜日別消費データ
       supabase.from('daily_summary').select('date, total_consumption').gte('date', (() => { const d = new Date(); d.setDate(d.getDate() - 28); return d.toLocaleDateString('sv-SE') })()).lte('date', date).order('date', { ascending: false }),
@@ -124,7 +125,17 @@ export default function DashboardPage() {
     )
     setWorkShifts((shiftsData as WorkShift[]) ?? [])
     setEquipmentCheckedToday((equipCheckData ?? []).length > 0)
-    setTodayHandoverDone(!!todayHandoverData)
+    const todayHandover = todayHandoverData as { id: string; content: string } | null
+    setTodayHandoverDone(!!todayHandover)
+    if (todayHandover?.content) {
+      const raw = todayHandover.content
+      const checks = raw.startsWith('CHECKS:')
+        ? raw.slice(7, raw.includes('\n') ? raw.indexOf('\n') : undefined).split(',')
+        : []
+      setGdriveUploaded(checks.includes('gdrive_upload'))
+    } else {
+      setGdriveUploaded(false)
+    }
     setMonthlyCharcoalCost(
       ((charcoalData ?? []) as { amount: number }[]).reduce((s, r) => s + r.amount, 0)
     )
@@ -339,35 +350,40 @@ export default function DashboardPage() {
         <div className="bg-white rounded-2xl border border-slate-200 p-4">
           <h2 className="text-sm font-semibold text-slate-500 mb-3">🗒️ 今日やること</h2>
           <div className="space-y-2">
-            {[
-              { label: '予約カレンダーを確認', done: true, href: '/calendar', doneLabel: todayReservations.length > 0 ? `本日${todayReservations.length}件の予約あり` : '予約なし', alwaysShow: true, highlight: todayReservations.length > 0 },
+            {([
+              { label: '予約カレンダーを確認', done: true, href: '/calendar', doneLabel: todayReservations.length > 0 ? `本日${todayReservations.length}件の予約あり` : '予約なし', alwaysLink: true, highlight: todayReservations.length > 0 },
               { label: '開催回の入力', done: sessions.length > 0, href: '/sessions/new', doneLabel: `${sessions.length}回分入力済み` },
               { label: '備品チェック', done: equipmentCheckedToday, href: '/equipment', doneLabel: '確認済み' },
               { label: '日次締め（残数・仕入れ・引き継ぎ）', done: isClosed, href: '/daily', doneLabel: '締め済み' },
-              { label: '📸 写真・動画をGDriveにアップロード', done: todayHandoverDone, href: '/daily', doneLabel: '締めで確認済み' },
-            ].map(task => (
-              <Link key={task.label} href={task.href}
-                className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
-                  'highlight' in task && task.highlight ? 'bg-purple-50 border border-purple-200' :
+              { label: '📸 写真・動画をGDriveにアップロード', done: gdriveUploaded, href: '/daily', doneLabel: '確認済み ✓', noLinkWhenDone: true },
+            ] as const).map(task => {
+              const isHighlight = 'highlight' in task && task.highlight
+              const noNav = task.done && ('noLinkWhenDone' in task && task.noLinkWhenDone)
+              const inner = (
+                <div className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
+                  isHighlight ? 'bg-purple-50 border border-purple-200' :
                   task.done ? 'bg-green-50' : 'bg-slate-50 active:bg-slate-100'
                 }`}>
-                <span className="text-lg">
-                  {'highlight' in task && task.highlight ? '📅' : task.done ? '✅' : '⬜'}
-                </span>
-                <span className={`text-sm flex-1 ${
-                  'highlight' in task && task.highlight ? 'text-purple-700 font-bold' :
-                  task.done ? 'text-green-700' : 'text-slate-700 font-medium'
-                }`}>
-                  {task.label}
-                </span>
-                <span className={`text-xs ${
-                  'highlight' in task && task.highlight ? 'text-purple-600 font-semibold' :
-                  task.done ? 'text-green-600' : 'text-slate-300'
-                }`}>
-                  {task.done ? task.doneLabel : '›'}
-                </span>
-              </Link>
-            ))}
+                  <span className="text-lg">
+                    {isHighlight ? '📅' : task.done ? '✅' : '⬜'}
+                  </span>
+                  <span className={`text-sm flex-1 ${
+                    isHighlight ? 'text-purple-700 font-bold' :
+                    task.done ? 'text-green-700' : 'text-slate-700 font-medium'
+                  }`}>
+                    {task.label}
+                  </span>
+                  <span className={`text-xs ${
+                    isHighlight ? 'text-purple-600 font-semibold' :
+                    task.done ? 'text-green-600' : 'text-slate-300'
+                  }`}>
+                    {task.done ? task.doneLabel : '›'}
+                  </span>
+                </div>
+              )
+              if (noNav) return <div key={task.label}>{inner}</div>
+              return <Link key={task.label} href={task.href}>{inner}</Link>
+            })}
           </div>
         </div>
 

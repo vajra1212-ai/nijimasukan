@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency } from '@/lib/calculations'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { HandoverMemo, HandoverUrgency, TroubleRecord, TroubleCategory } from '@/types'
 import { getAuth } from '@/lib/auth'
