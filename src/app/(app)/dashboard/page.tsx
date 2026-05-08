@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getAuth } from '@/lib/auth'
 import { calcDailySummary, calcStockForecast, formatCurrency } from '@/lib/calculations'
-import { Session, DailyRecord, Settings, SupplierContact, HandoverMemo, WorkShift } from '@/types'
+import { Session, DailyRecord, Settings, SupplierContact, HandoverMemo, WorkShift, Reservation } from '@/types'
 import { SyncStatus } from '@/components/ui/SyncStatus'
 import { Card, AlertCard } from '@/components/ui/Card'
 
@@ -46,6 +46,7 @@ export default function DashboardPage() {
   const [confirmingDelivery, setConfirmingDelivery] = useState(false)
   const [monthlyCharcoalCost, setMonthlyCharcoalCost] = useState(0)
   const [tomorrowEstimate, setTomorrowEstimate] = useState<{ dow: number; avgConsumption: number; sampleSize: number } | null>(null)
+  const [todayReservations, setTodayReservations] = useState<Reservation[]>([])
 
   const fetchData = useCallback(async () => {
     const supabase = createClient()
@@ -65,6 +66,7 @@ export default function DashboardPage() {
       { data: todayHandoverData },
       { data: charcoalData },
       { data: dowData },
+      { data: reservationData },
     ] = await Promise.all([
       supabase.from('sessions').select('*').eq('date', date),
       supabase.from('daily_records').select('*').eq('date', date).single(),
@@ -85,6 +87,8 @@ export default function DashboardPage() {
       supabase.from('expenses').select('amount').eq('year_month', date.slice(0, 7)).eq('category', 'charcoal'),
       // 過去4週間の曜日別消費データ
       supabase.from('daily_summary').select('date, total_consumption').gte('date', (() => { const d = new Date(); d.setDate(d.getDate() - 28); return d.toLocaleDateString('sv-SE') })()).lte('date', date).order('date', { ascending: false }),
+      // 今日の予約
+      supabase.from('reservations').select('*').eq('date', date).order('time_slot'),
     ])
 
     setSessions((sessionsData as Session[]) ?? [])
@@ -103,6 +107,8 @@ export default function DashboardPage() {
     setMonthlyCharcoalCost(
       ((charcoalData ?? []) as { amount: number }[]).reduce((s, r) => s + r.amount, 0)
     )
+
+    setTodayReservations((reservationData as Reservation[]) ?? [])
 
     // 明日の曜日で消費量を予測
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
@@ -262,11 +268,41 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* ─── 今日の予約 ─── */}
+        {todayReservations.length > 0 && (
+          <Link href="/calendar">
+            <div className={`rounded-2xl border-2 p-4 ${
+              todayReservations.some(r => r.type === 'closure') ? 'bg-slate-50 border-slate-300' :
+              'bg-purple-50 border-purple-300'
+            }`}>
+              <p className="text-sm font-bold text-slate-700 mb-2">
+                📅 本日の予約・予定
+              </p>
+              <div className="space-y-1.5">
+                {todayReservations.map(r => (
+                  <div key={r.id} className="flex items-center gap-2 text-sm">
+                    <span>{r.type === 'group_reservation' ? '👥' : r.type === 'event' ? '🎉' : '🔒'}</span>
+                    <span className="font-semibold text-slate-800">{r.name ?? (r.type === 'closure' ? '休業日' : '予定')}</span>
+                    {r.expected_participants && (
+                      <span className="text-slate-500">{r.expected_participants}名</span>
+                    )}
+                    {r.time_slot && (
+                      <span className="text-slate-400 text-xs">{r.time_slot}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-purple-500 mt-2">タップしてカレンダーを確認 →</p>
+            </div>
+          </Link>
+        )}
+
         {/* ─── 今日のタスク ─── */}
         <div className="bg-white rounded-2xl border border-slate-200 p-4">
           <h2 className="text-sm font-semibold text-slate-500 mb-3">🗒️ 今日やること</h2>
           <div className="space-y-2">
             {[
+              { label: '予約カレンダーを確認', done: true, href: '/calendar', doneLabel: todayReservations.length > 0 ? `本日${todayReservations.length}件の予約あり` : '予約なし', alwaysShow: true, highlight: todayReservations.length > 0 },
               { label: '開催回の入力', done: sessions.length > 0, href: '/sessions/new', doneLabel: `${sessions.length}回分入力済み` },
               { label: '備品チェック', done: equipmentCheckedToday, href: '/equipment', doneLabel: '確認済み' },
               { label: '日次締め（残数・仕入れ）', done: isClosed, href: '/daily', doneLabel: '締め済み' },
@@ -274,18 +310,24 @@ export default function DashboardPage() {
             ].map(task => (
               <Link key={task.label} href={task.href}
                 className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
+                  'highlight' in task && task.highlight ? 'bg-purple-50 border border-purple-200' :
                   task.done ? 'bg-green-50' : 'bg-slate-50 active:bg-slate-100'
                 }`}>
-                <span className={`text-lg ${task.done ? 'opacity-100' : 'opacity-30'}`}>
-                  {task.done ? '✅' : '⬜'}
+                <span className="text-lg">
+                  {'highlight' in task && task.highlight ? '📅' : task.done ? '✅' : '⬜'}
                 </span>
-                <span className={`text-sm flex-1 ${task.done ? 'text-green-700 line-through' : 'text-slate-700 font-medium'}`}>
+                <span className={`text-sm flex-1 ${
+                  'highlight' in task && task.highlight ? 'text-purple-700 font-bold' :
+                  task.done ? 'text-green-700' : 'text-slate-700 font-medium'
+                }`}>
                   {task.label}
                 </span>
-                {task.done
-                  ? <span className="text-xs text-green-600">{task.doneLabel}</span>
-                  : <span className="text-slate-300 text-sm">›</span>
-                }
+                <span className={`text-xs ${
+                  'highlight' in task && task.highlight ? 'text-purple-600 font-semibold' :
+                  task.done ? 'text-green-600' : 'text-slate-300'
+                }`}>
+                  {task.done ? task.doneLabel : '›'}
+                </span>
               </Link>
             ))}
           </div>
@@ -419,10 +461,13 @@ export default function DashboardPage() {
           )}
         </Card>
 
-        {/* 人件費 */}
+        {/* 本日の出勤（予定・実績） */}
         {workShifts.length > 0 && (
           <Card>
-            <h2 className="text-sm font-semibold text-slate-500 mb-2">👷 本日の出勤</h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-semibold text-slate-500">👷 本日の出勤</h2>
+              <Link href="/shifts" className="text-xs text-sky-500">シフト管理 →</Link>
+            </div>
             <div className="space-y-1.5">
               {workShifts.map(s => {
                 const pt = s.part_timers
@@ -431,17 +476,21 @@ export default function DashboardPage() {
                 const [eh, em] = s.end_time.split(':').map(Number)
                 const hours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
                 return (
-                  <div key={s.id} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-700 font-medium">{pt.name}</span>
+                  <div key={s.id} className={`flex items-center justify-between text-sm rounded-lg px-2 py-1 ${s.is_planned ? 'bg-amber-50' : 'bg-green-50'}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs">{s.is_planned ? '📋' : '✅'}</span>
+                      <span className="text-slate-700 font-medium">{pt.name}</span>
+                      {s.is_planned && <span className="text-xs text-amber-600 font-medium">予定</span>}
+                    </div>
                     <span className="text-slate-500 text-xs">{s.start_time.slice(0,5)}〜{s.end_time.slice(0,5)}（{hours.toFixed(1)}h）</span>
-                    <span className="text-red-600 font-bold text-xs">{formatCurrency(hours * pt.hourly_wage)}</span>
+                    {!s.is_planned && <span className="text-red-600 font-bold text-xs">{formatCurrency(hours * pt.hourly_wage)}</span>}
                   </div>
                 )
               })}
             </div>
             {totalLaborCost > 0 && (
               <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between">
-                <span className="text-sm text-slate-600">人件費合計</span>
+                <span className="text-sm text-slate-600">確定人件費</span>
                 <span className="text-base font-bold text-red-600">{formatCurrency(totalLaborCost)}</span>
               </div>
             )}

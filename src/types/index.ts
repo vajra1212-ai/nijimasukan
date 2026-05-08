@@ -70,6 +70,7 @@ export interface WorkShift {
   part_timer_id: string
   start_time: string  // "HH:MM"
   end_time: string    // "HH:MM"
+  is_planned: boolean // true=出勤予定 / false=実績（日次締め確認済み）
   notes: string | null
   created_at: string
   part_timers?: PartTimer

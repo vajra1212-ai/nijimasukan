@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 const navItems = [
   { href: '/dashboard', label: 'ホーム',     icon: '🏠' },
   { href: '/sessions',  label: '入力',       icon: '✏️' },
-  { href: '/manual',    label: 'マニュアル', icon: '📖' },
+  { href: '/calendar',  label: '予約',       icon: '📅' },
   { href: '/equipment', label: '備品',       icon: '📦' },
   { href: '/records',   label: '記録',       icon: '📋' },
   { href: '/admin',     label: '管理',       icon: '📊', adminOnly: true },

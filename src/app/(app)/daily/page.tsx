@@ -262,11 +262,11 @@ function DailyForm() {
       setCharcoalExpenseId(null)
     }
 
-    // 出勤記録を保存
+    // 出勤記録を保存（日次締め時は is_planned=false で実績として確定）
     for (const s of shifts) {
       if (s.worked) {
         await supabase.from('work_shifts').upsert(
-          { id: s.shiftId, date, part_timer_id: s.partTimerId, start_time: s.startTime, end_time: s.endTime },
+          { id: s.shiftId, date, part_timer_id: s.partTimerId, start_time: s.startTime, end_time: s.endTime, is_planned: false },
           { onConflict: 'date,part_timer_id' }
         )
       } else if (s.shiftId) {
