@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getAuth } from '@/lib/auth'
 import { calcDailySummary, formatCurrency } from '@/lib/calculations'
@@ -387,6 +388,57 @@ export default function DailyPage() {
               <p className="text-xs text-red-500 mt-1">※ 消費が開始時残数＋仕入れを超えています</p>
             )}
           </div>
+        </Card>
+
+        {/* セッション一覧 */}
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-500">📋 この日の開催回</h3>
+            <Link
+              href={`/sessions/new?date=${date}`}
+              className="text-xs bg-sky-500 text-white px-3 py-1.5 rounded-lg font-medium"
+            >
+              ＋ 追加
+            </Link>
+          </div>
+          {sessions.length === 0 ? (
+            <div className="text-center py-4">
+              <p className="text-slate-400 text-sm mb-2">まだ開催回が入力されていません</p>
+              <Link
+                href={`/sessions/new?date=${date}`}
+                className="text-sky-500 text-sm font-medium"
+              >
+                ＋ 最初の開催回を入力
+              </Link>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {sessions.map(s => {
+                if (!settings) return null
+                const rev = s.participants * settings.participation_fee
+                  + s.salt_grilled_count * settings.salt_grilled_fee
+                  + (s.gutted_count ?? 0) * settings.gutted_fee
+                  + s.takeaway_count * settings.takeaway_fee
+                  - (s.discount_amount ?? 0)
+                return (
+                  <Link key={s.id} href={`/sessions/${s.id}/edit`}
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-slate-50 active:bg-slate-100">
+                    <div>
+                      <span className="text-sm font-bold text-slate-800">{s.session_number}回目</span>
+                      <span className="text-sm text-slate-600 ml-2">{s.participants}名</span>
+                      {s.salt_grilled_count > 0 && <span className="text-xs text-slate-500 ml-1">塩焼き{s.salt_grilled_count}</span>}
+                      {(s.gutted_count ?? 0) > 0 && <span className="text-xs text-slate-500 ml-1">わた出し{s.gutted_count}</span>}
+                      {s.takeaway_count > 0 && <span className="text-xs text-slate-500 ml-1">持帰{s.takeaway_count}</span>}
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-bold text-sky-600">{formatCurrency(rev)}</span>
+                      <span className="text-xs text-slate-300 ml-1">›</span>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </Card>
 
         {/* アルバイト出勤 */}

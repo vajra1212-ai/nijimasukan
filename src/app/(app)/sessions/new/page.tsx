@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { saveToQueue } from '@/lib/offline/queue'
 import { getAuth } from '@/lib/auth'
@@ -30,9 +30,10 @@ function loadSettings(raw: { key: string; value: string }[]): Settings {
   }
 }
 
-export default function NewSessionPage() {
+function NewSessionForm() {
   const router = useRouter()
-  const [date, setDate] = useState(today())
+  const searchParams = useSearchParams()
+  const [date, setDate] = useState(() => searchParams.get('date') ?? today())
   const [sessionNumber, setSessionNumber] = useState<number | null>(null)
   const [participants, setParticipants] = useState(0)
   const [saltGrilled, setSaltGrilled] = useState(0)
@@ -239,5 +240,13 @@ export default function NewSessionPage() {
         </Button>
       </div>
     </div>
+  )
+}
+
+export default function NewSessionPage() {
+  return (
+    <Suspense>
+      <NewSessionForm />
+    </Suspense>
   )
 }
