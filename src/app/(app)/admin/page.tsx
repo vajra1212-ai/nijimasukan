@@ -75,9 +75,10 @@ export default function AdminPage() {
     (r.total_takeaway ?? 0) * settings.takeaway_fee +
     (r.total_gutted ?? 0) * settings.gutted_fee
 
-  // 1日の仕入れ原価
+  // 1日の魚原価 = 消費匹数 × 単価（仕入れ単価 or 設定の基準単価）
+  // ※「その日に仕入れた匹数」ではなく「消費した匹数」で計算するのが正しい原価
   const calcCost = (r: DailySummaryRow) =>
-    (r.purchase_count ?? 0) * ((r.purchase_unit_price || 0) || settings.current_unit_price)
+    (r.total_consumption ?? 0) * (r.purchase_unit_price > 0 ? r.purchase_unit_price : settings.current_unit_price)
 
   const totalParticipants = summaries.reduce((s, r) => s + r.total_participants, 0)
   const totalConsumption  = summaries.reduce((s, r) => s + r.total_consumption, 0)
@@ -157,7 +158,7 @@ export default function AdminPage() {
               <p className="font-bold text-slate-700">{totalConsumption}匹</p>
             </div>
             <div>
-              <p className="text-xs text-slate-400">仕入原価</p>
+              <p className="text-xs text-slate-400">消費原価</p>
               <p className="font-bold text-orange-600">{formatCurrency(totalCost)}</p>
             </div>
           </div>
@@ -202,7 +203,7 @@ export default function AdminPage() {
                       <td className="px-2 py-2.5 text-right text-xs">
                         {r.closing_estimated_remaining !== null ? (
                           <span className={r.closing_estimated_remaining <= settings.stock_alert_threshold ? 'text-red-500 font-bold' : 'text-slate-600'}>
-                            {r.closing_estimated_remaining}匹
+                            {Math.max(0, r.closing_estimated_remaining)}匹
                           </span>
                         ) : '—'}
                       </td>
