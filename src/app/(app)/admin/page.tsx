@@ -11,11 +11,11 @@ interface DailySummaryRow {
   date: string
   session_count: number
   total_participants: number
-  total_salt_grilled: number
-  total_takeaway: number
-  total_gutted: number
+  total_salt_grilled: number | null
+  total_takeaway: number | null
+  total_gutted: number | null
   total_consumption: number
-  total_loss: number
+  total_loss: number | null
   purchase_count: number
   purchase_unit_price: number
   closing_estimated_remaining: number | null
@@ -68,16 +68,16 @@ export default function AdminPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // 1日の売上計算
+  // 1日の売上計算（null/undefined を 0 に安全変換）
   const calcRevenue = (r: DailySummaryRow) =>
-    r.total_participants * settings.participation_fee +
-    r.total_salt_grilled * settings.salt_grilled_fee +
-    r.total_takeaway * settings.takeaway_fee +
+    (r.total_participants ?? 0) * settings.participation_fee +
+    (r.total_salt_grilled ?? 0) * settings.salt_grilled_fee +
+    (r.total_takeaway ?? 0) * settings.takeaway_fee +
     (r.total_gutted ?? 0) * settings.gutted_fee
 
   // 1日の仕入れ原価
   const calcCost = (r: DailySummaryRow) =>
-    r.purchase_count * (r.purchase_unit_price || settings.current_unit_price)
+    (r.purchase_count ?? 0) * ((r.purchase_unit_price || 0) || settings.current_unit_price)
 
   const totalParticipants = summaries.reduce((s, r) => s + r.total_participants, 0)
   const totalConsumption  = summaries.reduce((s, r) => s + r.total_consumption, 0)

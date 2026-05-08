@@ -81,11 +81,11 @@ export default function AnalysisPage() {
       setDataSource('live')
       setDays(summary.map(r => ({
         date: r.date,
-        revenue: r.total_participants * s.participation_fee
-               + r.total_salt_grilled * s.salt_grilled_fee
-               + r.total_takeaway * s.takeaway_fee
+        revenue: (r.total_participants ?? 0) * s.participation_fee
+               + (r.total_salt_grilled ?? 0) * s.salt_grilled_fee
+               + (r.total_takeaway ?? 0) * s.takeaway_fee
                + (r.total_gutted ?? 0) * s.gutted_fee,
-        participants: r.total_participants,
+        participants: r.total_participants ?? 0,
         weather: weatherMap[r.date]?.weather ?? null,
         is_holiday: weatherMap[r.date]?.is_holiday ?? false,
       })))
