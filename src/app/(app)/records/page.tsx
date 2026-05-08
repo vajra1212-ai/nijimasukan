@@ -72,13 +72,26 @@ export default function RecordsPage() {
           </Card>
         </Link>
 
+        <Link href="/customers">
+          <Card className="active:bg-slate-50 cursor-pointer">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">👥</span>
+              <div>
+                <p className="font-bold text-slate-800">顧客・団体管理</p>
+                <p className="text-sm text-slate-500">予約客リスト・SMS送信・LINE誘導</p>
+              </div>
+              <span className="ml-auto text-slate-300">›</span>
+            </div>
+          </Card>
+        </Link>
+
         <Link href="/supplier">
           <Card className="active:bg-slate-50 cursor-pointer">
             <div className="flex items-center gap-3">
               <span className="text-3xl">📞</span>
               <div>
                 <p className="font-bold text-slate-800">業者連絡・発注記録</p>
-                <p className="text-sm text-slate-500">電話記録・発注・入荷管理</p>
+                <p className="text-sm text-slate-500">電話記録・発注・入荷管理・SMS</p>
               </div>
               <span className="ml-auto text-slate-300">›</span>
             </div>

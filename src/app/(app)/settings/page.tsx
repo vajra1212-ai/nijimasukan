@@ -20,6 +20,8 @@ export default function SettingsPage() {
   const [supplierName, setSupplierName] = useState('')
   const [supplierContact, setSupplierContact] = useState('')
   const [supplierPhone, setSupplierPhone] = useState('')
+  const [lineOfficialUrl, setLineOfficialUrl] = useState('')
+  const [smsTemplate, setSmsTemplate] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -46,6 +48,8 @@ export default function SettingsPage() {
       setSupplierName(map.supplier_name ?? '')
       setSupplierContact(map.supplier_contact_name ?? '')
       setSupplierPhone(map.supplier_phone ?? '')
+      setLineOfficialUrl(map.line_official_url ?? '')
+      setSmsTemplate(map.sms_template ?? 'この度はニジマスつかみ取り体験にお越しいただきありがとうございました。よろしければLINE公式アカウントへの登録をお願いいたします。{LINE_URL}\nまたのご来場をお待ちしております。キラリ')
     }
     setPartTimers((ptData as PartTimer[]) ?? [])
   }, [])
@@ -66,6 +70,8 @@ export default function SettingsPage() {
       { key: 'supplier_name',         value: supplierName },
       { key: 'supplier_contact_name', value: supplierContact },
       { key: 'supplier_phone',        value: supplierPhone },
+      { key: 'line_official_url',     value: lineOfficialUrl },
+      { key: 'sms_template',          value: smsTemplate },
     ]
     for (const u of updates) {
       await supabase.from('settings').upsert({ key: u.key, value: u.value, updated_by: auth?.staffId ?? null, updated_at: new Date().toISOString() })
@@ -173,6 +179,25 @@ export default function SettingsPage() {
                   className={inputClass} />
               </div>
             ))}
+          </div>
+        </Card>
+
+        <Card>
+          <h3 className="text-sm font-semibold text-slate-500 mb-3">📱 LINE・SMS設定</h3>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-slate-400">LINE公式アカウントURL</label>
+              <input type="url" value={lineOfficialUrl} onChange={e => setLineOfficialUrl(e.target.value)}
+                placeholder="https://lin.ee/xxxxxxx"
+                className={inputClass} />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">顧客向けSMSテンプレート</label>
+              <p className="text-xs text-slate-400 mb-1">※ {'{'+'LINE_URL'+'}'} の部分にLINE URLが自動挿入されます</p>
+              <textarea value={smsTemplate} onChange={e => setSmsTemplate(e.target.value)}
+                rows={4}
+                className="w-full text-sm bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 outline-none resize-none" />
+            </div>
           </div>
         </Card>
 

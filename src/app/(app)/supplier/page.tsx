@@ -32,15 +32,24 @@ export default function SupplierPage() {
   const [orderCount, setOrderCount] = useState(0)
   const [deliveryDate, setDeliveryDate] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showSms, setShowSms] = useState(false)
+  const [smsText, setSmsText] = useState('')
+  interface MsgLog { id: string; recipient_name: string; phone: string; message: string; sent_at: string }
+  const [smsLogs, setSmsLogs] = useState<MsgLog[]>([])
 
   const fetchData = useCallback(async () => {
     const supabase = createClient()
-    const [{ data: settingsData }, { data: contactsData }] = await Promise.all([
+    const [{ data: settingsData }, { data: contactsData }, { data: logData }] = await Promise.all([
       supabase.from('settings').select('*'),
       supabase.from('supplier_contacts').select('*').order('contact_datetime', { ascending: false }).limit(10),
+      supabase.from('message_logs').select('*').eq('recipient_type', 'supplier').order('sent_at', { ascending: false }).limit(10),
     ])
-    if (settingsData) setSettings(loadSettings(settingsData as { key: string; value: string }[]))
+    if (settingsData) {
+      const s = loadSettings(settingsData as { key: string; value: string }[])
+      setSettings(s)
+    }
     setContacts((contactsData as SupplierContact[]) ?? [])
+    setSmsLogs((logData ?? []) as MsgLog[])
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -62,6 +71,23 @@ export default function SupplierPage() {
     setHasOrder(false)
     setOrderCount(0)
     setDeliveryDate('')
+    fetchData()
+  }
+
+  const handleSendSms = async () => {
+    if (!settings?.supplier_phone || !smsText.trim()) return
+    const supabase = createClient()
+    const auth = getAuth()
+    await supabase.from('message_logs').insert({
+      recipient_type: 'supplier',
+      recipient_name: settings.supplier_name || '仕入れ業者',
+      phone: settings.supplier_phone,
+      message: smsText,
+      sent_by: auth?.staffId ?? null,
+    })
+    const phone = settings.supplier_phone.replace(/[^0-9+]/g, '')
+    window.location.href = `sms:${phone}?body=${encodeURIComponent(smsText)}`
+    setShowSms(false)
     fetchData()
   }
 
@@ -94,11 +120,44 @@ export default function SupplierPage() {
               📞 電話する（{settings.supplier_phone}）
             </a>
             <button
+              onClick={() => {
+                const today = new Date().toLocaleDateString('ja-JP', { month: 'long', day: 'numeric' })
+                setSmsText(`いつもお世話になっております。ニジマスつかみ取り キラリです。\n${today}のご連絡です。\n\n`)
+                setShowSms(true)
+              }}
+              className="w-full mt-2 flex items-center justify-center gap-2 bg-green-500 text-white rounded-xl py-2.5 font-medium text-sm"
+            >
+              💬 ショートメールを送る
+            </button>
+            <button
               onClick={() => setShowForm(true)}
-              className="w-full mt-2 text-sm text-slate-500 py-2"
+              className="w-full mt-1 text-sm text-slate-400 py-1.5"
             >
               通話後に記録を残す →
             </button>
+
+            {/* SMS入力 */}
+            {showSms && (
+              <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                <p className="text-xs font-semibold text-slate-600">ショートメール内容</p>
+                <textarea
+                  value={smsText}
+                  onChange={e => setSmsText(e.target.value)}
+                  rows={5}
+                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 outline-none resize-none"
+                />
+                <div className="flex gap-2">
+                  <button onClick={() => setShowSms(false)}
+                    className="flex-1 text-xs py-2 rounded-xl border border-slate-200 text-slate-500">
+                    キャンセル
+                  </button>
+                  <button onClick={handleSendSms}
+                    className="flex-1 text-xs py-2 rounded-xl bg-green-500 text-white font-bold">
+                    📱 SMSアプリで送信
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -149,6 +208,26 @@ export default function SupplierPage() {
               <Button onClick={handleSaveContact} disabled={saving} className="flex-1">
                 {saving ? '保存中...' : '記録を保存'}
               </Button>
+            </div>
+          </div>
+        )}
+
+        {/* SMS送信履歴 */}
+        {smsLogs.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-slate-500 mb-2">📋 SMS送信履歴</h3>
+            <div className="space-y-2">
+              {smsLogs.map(log => (
+                <div key={log.id} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+                  <div className="flex justify-between items-center mb-1">
+                    <p className="text-sm font-semibold text-slate-800">{log.recipient_name}</p>
+                    <p className="text-xs text-slate-400">
+                      {new Date(log.sent_at).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-500 line-clamp-2">{log.message}</p>
+                </div>
+              ))}
             </div>
           </div>
         )}
