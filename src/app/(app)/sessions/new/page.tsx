@@ -105,7 +105,12 @@ function NewSessionForm() {
       await saveToQueue('sessions', data)
     }
 
-    router.push('/sessions')
+    // 過去日付から来た場合は日次ページへ、そうでなければセッション一覧へ
+    if (date !== today()) {
+      router.push(`/daily?date=${date}`)
+    } else {
+      router.push('/sessions')
+    }
   }
 
   return (

@@ -4,7 +4,7 @@ import { useState, useEffect, use } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/calculations'
-import { Settings, Session } from '@/types'
+import { Settings, Session, CustomerType } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { NumberInput } from '@/components/ui/NumberInput'
 import { Button } from '@/components/ui/Button'
@@ -36,6 +36,7 @@ export default function EditSessionPage({ params }: { params: Promise<{ id: stri
   const [giftCount, setGiftCount] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
   const [memo, setMemo] = useState('')
+  const [customerType, setCustomerType] = useState<CustomerType | null>(null)
   const [sessionNumber, setSessionNumber] = useState(0)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -63,12 +64,14 @@ export default function EditSessionPage({ params }: { params: Promise<{ id: stri
       setGiftCount(s.gift_count ?? 0)
       setDiscountAmount(s.discount_amount ?? 0)
       setMemo(s.memo ?? '')
+      setCustomerType(s.customer_type ?? null)
       if (settingsData) setSettings(loadSettings(settingsData as { key: string; value: string }[]))
       setLoading(false)
     })
   }, [id])
 
   const consumption = saltGrilled + takeaway + gutted + giftCount
+  const hasConsumptionWarning = consumption > participants && participants > 0
   const revenue = settings
     ? participants * settings.participation_fee
       + saltGrilled * settings.salt_grilled_fee
@@ -90,6 +93,7 @@ export default function EditSessionPage({ params }: { params: Promise<{ id: stri
       gift_count: giftCount,
       discount_amount: discountAmount,
       memo: memo || null,
+      customer_type: customerType,
       updated_at: new Date().toISOString(),
     }).eq('id', id)
 
@@ -129,7 +133,7 @@ export default function EditSessionPage({ params }: { params: Promise<{ id: stri
           <NumberInput label={`持ち帰り（${settings?.takeaway_fee ?? 400}円）`} value={takeaway} onChange={setTakeaway} unit="匹" max={999} />
         </div>
 
-        <div className="rounded-xl p-3 bg-sky-50 border border-sky-200">
+        <div className={`rounded-xl p-3 border ${hasConsumptionWarning ? 'bg-amber-50 border-amber-300' : 'bg-sky-50 border-sky-200'}`}>
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">消費合計</span>
             <span className="font-bold">{consumption} 匹</span>
@@ -140,6 +144,31 @@ export default function EditSessionPage({ params }: { params: Promise<{ id: stri
               <span className="font-bold text-sky-600">{formatCurrency(revenue)}</span>
             </div>
           )}
+          {hasConsumptionWarning && (
+            <p className="text-xs text-amber-700 mt-1">⚠️ 消費匹数が参加人数を超えています</p>
+          )}
+        </div>
+
+        {/* 客層 */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+          <p className="text-sm font-semibold text-slate-600 mb-2">客層（任意）</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {([
+              ['family', '👨‍👩‍👧 家族'],
+              ['school', '🏫 学校・団体'],
+              ['company', '🏢 企業'],
+              ['individual', '👤 個人'],
+              ['other', '🎯 その他'],
+            ] as [CustomerType, string][]).map(([val, label]) => (
+              <button key={val} type="button"
+                onClick={() => setCustomerType(customerType === val ? null : val)}
+                className={`py-1.5 rounded-xl border text-xs font-medium transition-colors ${
+                  customerType === val ? 'bg-sky-500 text-white border-sky-500' : 'bg-white text-slate-600 border-slate-200'
+                }`}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">

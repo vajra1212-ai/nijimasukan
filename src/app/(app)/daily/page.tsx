@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getAuth } from '@/lib/auth'
@@ -42,11 +42,12 @@ interface ShiftEntry {
   shiftId?: string
 }
 
-export default function DailyPage() {
+function DailyForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
-  // 日付（過去遡り対応）
-  const [date, setDate] = useState(todayStr())
+  // 日付（過去遡り対応・URLパラメータ対応）
+  const [date, setDate] = useState(() => searchParams.get('date') ?? todayStr())
 
   // 仕入れ
   const [purchase, setPurchase] = useState(0)
@@ -633,5 +634,13 @@ export default function DailyPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function DailyPage() {
+  return (
+    <Suspense>
+      <DailyForm />
+    </Suspense>
   )
 }
