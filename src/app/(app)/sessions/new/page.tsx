@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { saveToQueue } from '@/lib/offline/queue'
 import { getAuth } from '@/lib/auth'
 import { formatCurrency } from '@/lib/calculations'
+import { loadSettings } from '@/lib/settings'
 import { Settings, CustomerType } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { NumberInput } from '@/components/ui/NumberInput'
@@ -15,20 +16,6 @@ function today() {
   return new Date().toLocaleDateString('sv-SE')
 }
 
-function loadSettings(raw: { key: string; value: string }[]): Settings {
-  const map = Object.fromEntries(raw.map(r => [r.key, r.value]))
-  return {
-    participation_fee:     parseInt(map.participation_fee ?? '500'),
-    takeaway_fee:          parseInt(map.takeaway_fee ?? '400'),
-    salt_grilled_fee:      parseInt(map.salt_grilled_fee ?? '700'),
-    gutted_fee:            parseInt(map.gutted_fee ?? '600'),
-    stock_alert_threshold: parseInt(map.stock_alert_threshold ?? '100'),
-    supplier_name:         map.supplier_name ?? '',
-    supplier_contact_name: map.supplier_contact_name ?? '',
-    supplier_phone:        map.supplier_phone ?? '',
-    current_unit_price:    parseInt(map.current_unit_price ?? '0'),
-  }
-}
 
 function NewSessionForm() {
   const router = useRouter()
@@ -71,6 +58,7 @@ function NewSessionForm() {
     : 0
 
   const hasConsumptionWarning = consumption > participants && participants > 0
+  const hasDiscountWarning = settings !== null && discountAmount > (revenue + discountAmount)
 
   const handleSave = async () => {
     if (!sessionNumber) { setError('開催回を選択してください'); return }
@@ -221,6 +209,7 @@ function NewSessionForm() {
             <div className="text-xs text-slate-500 space-y-0.5">
               {giftCount > 0 && <p>🎁 プレゼント {giftCount}匹（消費数に含まれます・売上には含まれません）</p>}
               {discountAmount > 0 && <p>🏷️ 値引き {formatCurrency(discountAmount)}（売上から差し引かれます）</p>}
+              {hasDiscountWarning && <p className="text-red-600 font-semibold">⚠️ 値引き額が売上を超えています</p>}
             </div>
           )}
         </div>

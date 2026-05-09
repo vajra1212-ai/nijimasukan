@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Expense, ExpenseCategory } from '@/types'
 import { formatCurrency } from '@/lib/calculations'
+import { groupBy } from '@/lib/settings'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -100,7 +101,7 @@ export default function ExpensesPage() {
   }
 
   const totalAmount = expenses.reduce((s, e) => s + e.amount, 0)
-  const byCategory = Object.groupBy(expenses, e => e.category) as Partial<Record<ExpenseCategory, Expense[]>>
+  const byCategory = groupBy(expenses, e => e.category) as Partial<Record<ExpenseCategory, Expense[]>>
 
   const unitOptions: Record<ExpenseCategory, string> = {
     charcoal: 'kg', equipment: '個', utility: '円', cleaning: '個', other: '式',

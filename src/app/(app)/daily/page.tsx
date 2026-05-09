@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { getAuth } from '@/lib/auth'
 import { calcDailySummary, formatCurrency } from '@/lib/calculations'
+import { loadSettings } from '@/lib/settings'
 import { Session, DailyRecord, Settings, Weather, PartTimer, HandoverMemo, HandoverUrgency, TroubleRecord, TroubleCategory } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { NumberInput } from '@/components/ui/NumberInput'
@@ -59,20 +60,6 @@ function prevDay(dateStr: string): string {
   return d.toLocaleDateString('sv-SE')
 }
 
-function loadSettings(raw: { key: string; value: string }[]): Settings {
-  const map = Object.fromEntries(raw.map(r => [r.key, r.value]))
-  return {
-    participation_fee:     parseInt(map.participation_fee ?? '500'),
-    takeaway_fee:          parseInt(map.takeaway_fee ?? '400'),
-    salt_grilled_fee:      parseInt(map.salt_grilled_fee ?? '700'),
-    gutted_fee:            parseInt(map.gutted_fee ?? '600'),
-    stock_alert_threshold: parseInt(map.stock_alert_threshold ?? '100'),
-    supplier_name:         map.supplier_name ?? '',
-    supplier_contact_name: map.supplier_contact_name ?? '',
-    supplier_phone:        map.supplier_phone ?? '',
-    current_unit_price:    parseInt(map.current_unit_price ?? '0'),
-  }
-}
 
 interface ShiftEntry {
   partTimerId: string
@@ -285,10 +272,14 @@ function DailyForm() {
   , [shifts, partTimers])
 
   // ---- 保存 ----
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   const handleSave = async (close: boolean) => {
     setSaving(true)
+    setSaveError(null)
     const supabase = createClient()
     const auth = getAuth()
+    try {
 
     const payload: Partial<DailyRecord> = {
       date,
@@ -385,9 +376,13 @@ function DailyForm() {
       })
     }
 
-    setSaving(false)
-    setSaved(true)
-    if (close) router.push('/')
+      setSaving(false)
+      setSaved(true)
+      if (close) router.push('/')
+    } catch (err) {
+      setSaving(false)
+      setSaveError(err instanceof Error ? err.message : '保存に失敗しました。再度お試しください。')
+    }
   }
 
   const updateShift = (ptId: string, field: keyof ShiftEntry, value: boolean | string) => {
@@ -861,6 +856,11 @@ function DailyForm() {
         </div>
 
         {saved && <p className="text-green-600 text-sm text-center">保存しました ✅</p>}
+        {saveError && (
+          <p className="text-red-600 text-sm text-center bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            ⚠️ {saveError}
+          </p>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Button variant="outline" onClick={() => handleSave(false)} disabled={saving}>一時保存</Button>
@@ -875,7 +875,7 @@ function DailyForm() {
 
 export default function DailyPage() {
   return (
-    <Suspense>
+    <Suspense fallback={<div className="flex items-center justify-center h-64"><p className="text-slate-400">読み込み中...</p></div>}>
       <DailyForm />
     </Suspense>
   )

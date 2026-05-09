@@ -35,11 +35,13 @@ export function BottomNav() {
             <Link
               key={item.href}
               href={item.href}
+              aria-label={item.label}
+              aria-current={active ? 'page' : undefined}
               className={`flex-1 flex flex-col items-center py-2 gap-0.5 text-xs font-medium transition-colors ${
                 active ? 'text-sky-500' : 'text-slate-400'
               }`}
             >
-              <span className="text-xl leading-tight">{item.icon}</span>
+              <span className="text-xl leading-tight" aria-hidden="true">{item.icon}</span>
               <span>{item.label}</span>
             </Link>
           )

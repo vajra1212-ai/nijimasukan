@@ -3,25 +3,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getAuth } from '@/lib/auth'
+import { loadSettings } from '@/lib/settings'
 import { Settings, SupplierContact } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 
-function loadSettings(raw: { key: string; value: string }[]): Settings {
-  const map = Object.fromEntries(raw.map(r => [r.key, r.value]))
-  return {
-    participation_fee:     parseInt(map.participation_fee ?? '500'),
-    takeaway_fee:          parseInt(map.takeaway_fee ?? '400'),
-    gutted_fee:            parseInt(map.gutted_fee ?? '600'),
-    salt_grilled_fee:      parseInt(map.salt_grilled_fee ?? '700'),
-    stock_alert_threshold: parseInt(map.stock_alert_threshold ?? '100'),
-    supplier_name:         map.supplier_name ?? '',
-    supplier_contact_name: map.supplier_contact_name ?? '',
-    supplier_phone:        map.supplier_phone ?? '',
-    current_unit_price:    parseInt(map.current_unit_price ?? '0'),
-  }
-}
 
 export default function SupplierPage() {
   const [settings, setSettings] = useState<Settings | null>(null)

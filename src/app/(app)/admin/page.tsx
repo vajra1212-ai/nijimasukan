@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/calculations'
+import { loadSettings } from '@/lib/settings'
+import { Settings } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 
@@ -22,32 +24,12 @@ interface DailySummaryRow {
   closed_at: string | null
 }
 
-interface Settings {
-  participation_fee: number
-  salt_grilled_fee: number
-  takeaway_fee: number
-  gutted_fee: number
-  stock_alert_threshold: number
-  current_unit_price: number
-}
-
-function loadSettings(raw: { key: string; value: string }[]): Settings {
-  const map = Object.fromEntries(raw.map(r => [r.key, r.value]))
-  return {
-    participation_fee:     parseInt(map.participation_fee ?? '500'),
-    salt_grilled_fee:      parseInt(map.salt_grilled_fee ?? '700'),
-    takeaway_fee:          parseInt(map.takeaway_fee ?? '400'),
-    gutted_fee:            parseInt(map.gutted_fee ?? '600'),
-    stock_alert_threshold: parseInt(map.stock_alert_threshold ?? '100'),
-    current_unit_price:    parseInt(map.current_unit_price ?? '0'),
-  }
-}
-
 export default function AdminPage() {
   const [summaries, setSummaries] = useState<DailySummaryRow[]>([])
   const [settings, setSettings] = useState<Settings>({
     participation_fee: 500, salt_grilled_fee: 700, takeaway_fee: 400,
     gutted_fee: 600, stock_alert_threshold: 100, current_unit_price: 0,
+    supplier_name: '', supplier_contact_name: '', supplier_phone: '',
   })
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [loading, setLoading] = useState(true)

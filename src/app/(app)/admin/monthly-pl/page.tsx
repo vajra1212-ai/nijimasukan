@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { Session, Expense, ExpenseCategory } from '@/types'
+import { Session, Expense, ExpenseCategory, Settings } from '@/types'
 import { formatCurrency } from '@/lib/calculations'
+import { loadSettings, groupBy } from '@/lib/settings'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 
@@ -16,16 +17,6 @@ const categoryLabels: Record<ExpenseCategory, string> = {
   other:     '📦 その他',
 }
 
-function loadSettings(raw: { key: string; value: string }[]) {
-  const map = Object.fromEntries(raw.map(r => [r.key, r.value]))
-  return {
-    participation_fee:  parseInt(map.participation_fee ?? '500'),
-    takeaway_fee:       parseInt(map.takeaway_fee ?? '400'),
-    salt_grilled_fee:   parseInt(map.salt_grilled_fee ?? '700'),
-    gutted_fee:         parseInt(map.gutted_fee ?? '600'),
-    current_unit_price: parseInt(map.current_unit_price ?? '0'),
-  }
-}
 
 interface WorkShiftRow {
   id: string; start_time: string; end_time: string
@@ -37,7 +28,7 @@ export default function MonthlyPLPage() {
   const [loading, setLoading] = useState(true)
 
   const [sessions, setSessions] = useState<Session[]>([])
-  const [settings, setSettings] = useState({ participation_fee: 500, takeaway_fee: 400, salt_grilled_fee: 700, gutted_fee: 600, current_unit_price: 0 })
+  const [settings, setSettings] = useState<Settings>({ participation_fee: 500, takeaway_fee: 400, salt_grilled_fee: 700, gutted_fee: 600, current_unit_price: 0, stock_alert_threshold: 100, supplier_name: '', supplier_contact_name: '', supplier_phone: '' })
   const [purchaseCost, setPurchaseCost] = useState(0)
   const [laborCost, setLaborCost] = useState(0)
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -100,7 +91,7 @@ export default function MonthlyPLPage() {
   const totalRevenue     = participationRev + saltGrilledRev + guttedRev + takeawayRev - discountTotal
 
   // 経費カテゴリ別合計
-  const expenseByCategory = Object.groupBy(expenses, e => e.category) as Partial<Record<ExpenseCategory, Expense[]>>
+  const expenseByCategory = groupBy(expenses, e => e.category) as Partial<Record<ExpenseCategory, Expense[]>>
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0)
 
   // 月次利益
